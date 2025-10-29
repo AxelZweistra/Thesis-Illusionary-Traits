@@ -24,7 +24,7 @@ library(reshape2)
 # extra for me
 library(tidyverse)
 
-## Function definitions
+## Function definitions from Bailey
 row <- function( M ){
     if( ! ( is.matrix(M) && dim(M)[1] == dim(M)[2] && dim(M)[1]>0 ) ){
         rowM <- NULL
@@ -55,323 +55,90 @@ irow <- function( rowM ){
 }
 ```
 
-## Additional Functions
+![](images/clipboard-1362719507.png)
 
-Let's first get a function allowing us to procedurally generate RI-CLPM model specifications. Courtesy of Gemini:
+### Simulations
+
+#### Auto-correlative effects
 
 ```{r}
-#' Generate Lavaan Syntax for a RI-CLPM
-#'
-#' This function creates the model specification string for a
-#' Random-Intercept Cross-Lagged Panel Model (RI-CLPM) for a
-#' given number of timepoints (T).
-#'
-#' @param T An integer specifying the total number of timepoints. Must be > 1.
-#'
-#' @return A single character string containing the complete lavaan model syntax.
-#'
-#' @examples
-#' # Generate a model for 8 timepoints
-#' model_t8 <- generate_riclpm(T = 8)
-#' cat(model_t8)
-#'
-#' # Generate a model for 50 timepoints
-#' model_t50 <- generate_riclpm(T = 50)
-#' # View the first few lines
-#' # head(strsplit(model_t50, "\n")[[1]])
+source("functionSource.R")
 
-generate_riclpm <- function(T) {
+conditions_autocorr <- c(.05,.1,.15,.2,.25,.3,.35,.4)
+timepoints <- 15 # just to check if it runs, run again with 90
+filename_prefix <- "small_timepoints_autocorr_sim"
+data_struct <- create_metadata()
 
-  # --- 1. Input Validation ---
-  if (!is.numeric(T) || T <= 1 || T %% 1 != 0) {
-    stop("T must be an integer greater than 1.")
-  }
-
-  # --- 2. Procedurally Generate Model Components ---
-
-  # Random Intercepts (RIx and RIy)
-  ri_x <- sprintf("RIx =~ %s", paste(sprintf("1*x%d", 1:T), collapse = " + "))
-  ri_y <- sprintf("RIy =~ %s", paste(sprintf("1*y%d", 1:T), collapse = " + "))
-
-  # Within-person component definitions (wx and wy)
-  wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
-  wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
-
-  # Autoregressive and cross-lagged paths (from T2 to T)
-  timepoints_reg <- 2:T
-  lagged_timepoints <- 1:(T - 1)
-  paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", timepoints_reg, lagged_timepoints, lagged_timepoints), collapse = "\n")
-  paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", timepoints_reg, lagged_timepoints, lagged_timepoints), collapse = "\n")
-
-  # Constrained correlated residuals (from T2 to T)
-  res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
-
-  # Variances of within-person components (all timepoints)
-  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
-  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
-
-  # Fix observed variances to zero
-  zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
-  zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
-
-
-  # --- 3. Assemble Final Model String ---
-
-  model_string <- paste(
-    "# 1. Random Intercepts", ri_x, ri_y,
-    "# 2. Within-person components", wx_defs, wy_defs,
-    "# 3. Autoregressive and cross-lagged paths", paths_wx, paths_wy,
-    "# 4. Covariances",
-    "wx1 ~~ wy1 # Covariance at T1",
-    res_covs,
-    "# 5. (Co)variances of Random Intercepts",
-    "RIx ~~ varRIx*RIx",
-    "RIy ~~ varRIy*RIy",
-    "RIx ~~ covRI*RIy",
-    "# 6. (Residual) variances of within-person components",
-    var_wx,
-    var_wy,
-    "# 7. Fix observed variances to zero",
-    zero_var_x,
-    zero_var_y,
-    "# 8. Fix RI covariances with first state to zero",
-    "wx1 ~~ 0*RIx",
-    "wx1 ~~ 0*RIy",
-    "wy1 ~~ 0*RIx",
-    "wy1 ~~ 0*RIy",
-    sep = "\n\n" # Separate sections with a blank line for readability
+# N participants
+for (a in seq(1:length(conditions_autocorr))){
+  cat("Starting simulation for condition ", a, "\n")
+  
+  data <- DGM(autocorr_effects = conditions_autocorr[a], timepoints = timepoints)
+  
+  # Initialize storage for this N condition
+  condition_results <- data.frame(
+    autocorr = integer(),
+    timepoints_used = integer(),
+    iteration = integer(),
+    varRIx = numeric(),
+    varRIy = numeric(),
+    convergence = logical(),
+    fit_measures = I(list()),  # list column
+    coefficients = I(list()),  
+    processing_time = numeric()
   )
-
-  return(model_string)
+  
+  for (i in seq(3,timepoints,1)){ # steps of 1 for smaller sim of lower values
+    start_time <- Sys.time()  
+    
+    modelSpec <- generate_riclpm(i)
+    
+    fit <- sem(model = modelSpec, data = data$data)
+    
+    converged <- lavInspect(fit, "converged")
+    fit_measures <- fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli",
+                                       "rmsea", "srmr"))
+    
+    coeff <- if(converged) {coef(fit)} else {NULL}  
+    
+    condition_results <- rbind(condition_results, data.frame(
+        autocorr = conditions_autocorr[a],  
+        timepoints_used = i,
+        iteration = i/3,
+        varRIx = if(converged) coef(fit)["varRIx"] else NA,
+        varRIy = if(converged) coef(fit)["varRIy"] else NA,
+        convergence = converged,
+        fit_measures = I(list(fit_measures)),
+        coefficients = I(list(coeff)),
+        processing_time = as.numeric(difftime(Sys.time(), start_time, 
+                                              units = "secs"))
+      ))
+    
+    rm(fit)
+  }
+  
+  data_struct$results <- rbind(data_struct$results, condition_results)
+  
+  filename <- save_clear(data_struct, filename_prefix)
+  
+  cat("Completed Sim no. ", a, "\n")
+  
+  rm(data)
+  gc()
 }
 ```
 
-Next up, we run the data generating mechanism up to our maximum amount of timepoints, say we take 100 as our max:
-
-```{r}
-set.seed(42)
-# Set parameters for the data generation model
-## Number of participants
-N <- 20000 
-
-## Number of generated time series
-T <- 100
-
-## Number of X-related confounders
-c1 <- 5
-
-## Number of Y-related confounders
-c2 <- 5
-
-## Autoregressive effects (for all variables)
-alpha <- 0.2
-
-## Cross-lagged effects of the focal effect (X and Y)
-beta_focal <- 0.1
-
-## Main confounding effects: Cross-lagged effects 
-## (1) between X-related confounders and X
-## (2) between Y-related confounders and Y
-## (3) within X-related confounders
-## (4) within Y-related confounders
-## They are all set to be equal in this simulation but can be easily changed
-
-beta_covfocal <- 0.1
-
-## Trivial confounding effects: Cross-lagged effects 
-## (1) between X-related confounders and Y
-## (2) between Y-related confoudners and X
-## (3) between X-related confounder and Y-related confounders
-##  They are all set to be equal in this simulation but can be easily changed
-
-beta_covnofocal <- 0.01
-
-## Time-specific residual variance
-sigma <- 0.5
-
-
-# Create objects for the simulation
-
-## total number of variables
-v <- c1 + c2 + 2
-
-
-## A: Matrix of path coefficients
-##   A[1,2] - Effects of V2 at t-1 on V1 at t
-##   A[2,1] - Effects of V1 at t-1 on V2 at t
-##
-
-
-A <- matrix(NA, v, v)
-diag(A) <- alpha
-
-A[lower.tri(A, diag = FALSE)] <- beta_covnofocal 
-A[upper.tri(A, diag = FALSE)] <- beta_covnofocal
-
-c1t <- 3:(2+c1)
-c2t <- (3+c1):v
-
-A[c1t, 1] <- beta_covfocal
-A[1, c1t] <- beta_covfocal
-
-A[c2t, 2] <- beta_covfocal
-A[2, c2t] <- beta_covfocal
-
-
-A[c1t, c1t][lower.tri(A[c1t, c1t], diag = FALSE)] <- beta_covfocal
-A[c1t, c1t][upper.tri(A[c1t, c1t], diag = FALSE)] <- beta_covfocal
-
-A[c2t, c2t][lower.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
-A[c2t, c2t][upper.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
-
-A[1,2] <- beta_focal
-A[2,1] <- beta_focal
-
-
-
-
-## Check the max eigenvalue (to check convergence --- see the manuscript)
-# max(eigen(A)$values)
-
-## Sigma: Var-cov matrix of time-specific residuals
-Sigma <- diag(rep(sigma, v))
-
-## Sigma1: Stationary Var-cov matrix for the first time point
-Sigma1 <- irow( solve( diag(dim(A)[1]^2) - t(A) %x% t(A) ) %*% row(Sigma) )
-
-## Mean1: Stationary means for first time point (as no process intercepts are defined/used, apparently 0)
-Mean1 <- matrix( 0, nrow=dim(A)[1], ncol=1 )
-
-
-
-# Generate data
-
-## Wide-format "bivariate" (X and Y) data df: N x 2*T
-## df stores the data from all time points
-df <- matrix(NA, nrow = N, ncol = 2*T)
-colnames(df) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
-
-## data at each time point D: N x v (total number of variables) 
-## D stores the data for each time point only, i.e., D will be updated in a loop
-## Generate the initial values for X and Y and store them in D
-D <- rmvnorm(N, mean = Mean1, Sigma1)
-
-## Store the initial data from D to df. 
-## Store the initial X (the first column of D) and Y (the second column of D) in df
-df[, 1] <- D[,1]
-df[, 1+T] <- D[, 2]
-
-
-
-## Update D and df till time T
-
-for (i in 2:T){
-  D <-  D %*% t(A) + rmvnorm(N, sigma = Sigma)
-
-  df[, i] <- D[,1]
-  df[, i+T] <- D[, 2]
-}
-
-```
-
-Now we can run the actual simulation. Fit RI-CLPM models on procedurally more timepoints and extract the variance of the RI's.
-
-```{r}
-fits <- list()
-varRIx <- NULL
-varRIy <- NULL
-
-for (i in seq(3,90,3)){
-  modelSpec <- generate_riclpm(i)
-  
-  fit <- sem(model = modelSpec, data = df)
-  
-  fits[[i/3]] <- fit
-  varRIx[i/3] <- coef(fit)["varRIx"]
-  varRIy[i/3] <- coef(fit)["varRIy"]
-  
-  print(i)
-}
-
-#varRIx_alpha_420 <- varRIx
-saveRDS(varRIx_alpha_420, file = "varRIx_alpha_420.RDS")
-
-#fits_alpha_420 <- fits
-saveRDS(fits_alpha_420, file = "fits_alpha_420.RDS")
-
-```
-
-```{r}
-plot(y = varRIx, x = seq(3, 90, 3), 
-     main = "Variance of random intercept of x by amount of timepoints",
-     xlab = "Timepoints")
-plot(y = varRIy, x = seq(3, 90, 3), 
-     main = "Variance of random intercept of y by amount of timepoints",
-     xlab = "Timepoints")
-```
-
-Plotting them together
-
-```{r}
-
-data.frame(
-  Timepoints = seq(3, 90, 3),
-  varRIx_alpha_2 = 
-    readRDS("Thesis-Illusionary-Traits/data/SIM1/varRIx_alpha_2.RDS"),
-  varRIx_alpha_3 = 
-    readRDS("Thesis-Illusionary-Traits/data/SIM1/varRIx_alpha_3.RDS"),
-  varRIx_alpha_35= 
-    readRDS("Thesis-Illusionary-Traits/data/SIM1/varRIx_alpha_35.RDS"),
-  varRIx_alpha_4 = 
-    readRDS("Thesis-Illusionary-Traits/data/SIM1/varRIx_alpha_420.RDS"),
-  varRIx_alpha_420 = 
-    readRDS("Thesis-Illusionary-Traits/data/SIM1/varRIx_alpha_420.RDS")
-) %>%
-  pivot_longer(
-    cols = 
-      c("varRIx_alpha_2","varRIx_alpha_3","varRIx_alpha_35",
-        "varRIx_alpha_4","varRIx_alpha_420"),
-    names_to = "Autoregressive_Effects",
-    values_to = "Estimated_Variance"
-    ) %>%
-  ggplot(aes(x = Timepoints, y = Estimated_Variance, color = Autoregressive_Effects)) +
-  geom_line(linewidth = 1) +
-  labs(
-    title = "Random Intercept Variance for Differing Autoregressive Effects",
-    y = "Estimated Variance",
-    color = "Autoregressive Effects"
-  ) +
-  theme_minimal()
-```
-
-Plot individual sequences for x and y
-
-```{r}
-library(reshape2)
-source("functionSource.R")
-
-testData <- DGM(timepoints = 80)
-plot_xy_sequences(testData$data, 
-                  timepoints = testData$parameters$timepoints, n_participants = 1)
-
-```
-
-Two additional smaller simulations
-
-1.  N participants vary (300, 600, 900)
-2.  N confounders vary (3, 5, 7)
-
-Other parameters should stay the same as in Bailey i guess? Maybe check stationarity for more confounders with stronger autoregressive effects.
+#### Number of participants
 
 ```{r}
 source("functionSource.R")
-N_part <- c(300, 600, 900)
-timepoints <- 78
+N_part <- c(300, 600, 900, 1200)
+timepoints <- 81
 filename_prefix <- "N_participants_sim"
 data_struct <- create_metadata()
 
 # N participants
-for (a in seq(1:3)){
+for (a in seq(1:length(N_part))){
   cat("Starting simulation for condition ", a, "\n")
   
   data <- DGM(N = N_part[a], timepoints = timepoints)
@@ -429,49 +196,17 @@ for (a in seq(1:3)){
 }
 ```
 
-```{r}
-results <- N_participants_sim_20250902_142615$results
-
-# Create the plot
-varRix_plot <- ggplot(data = results, 
-                      aes(x = timepoints_used, 
-                          y = varRIx, 
-                          group = factor(N_participants), 
-                          color = factor(N_participants))) +
-  geom_line(linewidth = 1) +  # Add the line layer
-  geom_point(size = 2) +     # Add points to mark the actual data points
-  
-  # --- Customize labels and titles ---
-  labs(title = "varRIx over Timepoints by Number of Participants",
-       x = "Timepoints Used",
-       y = "varRIx Value",
-       color = "N Participants") + # This renames the legend title
-       
-  # --- Apply a clean theme ---
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 16), # Center the title
-    legend.position = "bottom" # Move legend to the bottom
-  )
-
-# --- Display the plot ---
-print(varRix_plot)
-
-# --- Optionally, save the plot to a file ---
-ggsave("varRix_simulation_plot.png", plot = varRix_plot, width = 10, height = 7, dpi = 300)
-```
-
-Confounder variation
+#### Number of confounders
 
 ```{r}
 source("functionSource.R")
-N_conf <- c(3, 5, 7)
-timepoints <- 78
+N_conf <- c(3, 4, 5, 6, 7)
+timepoints <- 90
 filename_prefix <- "N_confounder_sim"
 data_struct <- create_metadata()
 
 # N participants
-for (a in seq(1:3)){
+for (a in seq(1:length(N_conf))){
   cat("Starting simulation for condition ", a, "\n")
   
   data <- DGM(N = 20000, n_x_confounders = N_conf[a], n_y_confounders = N_conf[a],
@@ -530,119 +265,666 @@ for (a in seq(1:3)){
 }
 ```
 
-```{r}
-results <- N_confounder_sim_20250902_145933$results
+### Plotting
 
-# Create the plot
-varRix_plot <- ggplot(data = results, 
-                      aes(x = timepoints_used, 
-                          y = varRIx, 
-                          group = factor(N_confounders), 
-                          color = factor(N_confounders))) +
- # lims(y = c(0, 0.1))+ # to remove the outlying condition from the plot
-  geom_line(linewidth = 1) +  # Add the line layer
-  geom_point(size = 2) +     # Add points to mark the actual data points
-  
-  # --- Customize labels and titles ---
-  labs(title = "varRIx over Timepoints by Number of Confounders",
-       x = "Timepoints Used",
-       y = "varRIx Value",
-       color = "N Confounders") + # This renames the legend title
-       
-  # --- Apply a clean theme ---
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 16), # Center the title
-    legend.position = "bottom" # Move legend to the bottom
-  )
-
-# --- Display the plot ---
-print(varRix_plot)
-
-
-
-```
-
-My next simulation should involve checking the interplay between the bias of the focal crosslagged effects and the random intercept variance. Bias of the crosslagged effects is defined as the estimated cross-lagged effect - the actual cross-lagged effect (0.1)
+#### Auto-correlative effects
 
 ```{r}
-# Extract cross-lagged coefficients and calculate bias
-results <- N_confounder_sim_20250902_145933$results
+source("functionSource.R")
+results <- larger_corrected_autocorr_sim_20250914_125635$results
 
-# True value of cross-lagged paths from your DGM (beta_focal = 0.1)
-true_beta_focal <- 0.1
+varRIxplot <- plot_varRIx(data = results,
+                          x_var = "timepoints_used",
+                          group_var = "autocorr",
+                          x_label = "Timepoints used",
+                          group_label = "Autoregression",
+                          plot_title = 
+                            "VarRIx over timepoints by strength of autoregression")
+print(varRIxplot)
 
-# Extract bx and by coefficients and calculate bias
-results$bx <- sapply(results$coefficients, function(coef_list) {
-  if(!is.null(coef_list) && "bx" %in% names(coef_list)) {
-    return(coef_list["bx"])
-  } else {
-    return(NA)
-  }
-})
+biasPlots <- plot_crosslag_bias(
+  data = results,
+  x_var = "timepoints_used",
+  group_var = "autocorr",
+  true_bx = .1, true_by = .1,
+  x_label = "Timepoints used",
+  group_label = "Autoregression",
+  title_suffix = "by strength of autoregression"
+)
+print(biasPlots)
 
-results$by <- sapply(results$coefficients, function(coef_list) {
-  if(!is.null(coef_list) && "by" %in% names(coef_list)) {
-    return(coef_list["by"])
-  } else {
-    return(NA)
-  }
-})
-
-# Calculate bias (estimated - true)
-results$bias_bx <- results$bx - true_beta_focal
-results$bias_by <- results$by - true_beta_focal
-
-# Plot bias for bx (X -> Y cross-lagged path)
-bias_bx_plot <- ggplot(data = results, 
-                       aes(x = timepoints_used, 
-                           y = bias_bx, 
-                           group = factor(N_confounders), 
-                           color = factor(N_confounders))) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
-  labs(title = "Bias in Cross-lagged Path bx (X→Y) over Timepoints by Number of Confounders",
-       x = "Timepoints Used",
-       y = "Bias in bx (Estimated - True)",
-       color = "N Confounders") +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 16),
-    legend.position = "bottom"
-  )
-
-print(bias_bx_plot)
-
-# Plot bias for by (Y -> X cross-lagged path)
-bias_by_plot <- ggplot(data = results, 
-                       aes(x = timepoints_used, 
-                           y = bias_by, 
-                           group = factor(N_confounders), 
-                           color = factor(N_confounders))) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
-  labs(title = "Bias in Cross-lagged Path by (Y→X) over Timepoints by Number of Confounders",
-       x = "Timepoints Used",
-       y = "Bias in by (Estimated - True)",
-       color = "N Confounders") +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 16),
-    legend.position = "bottom"
-  )
-
-print(bias_by_plot)
+plot <- plot_varRIx_proportion_auto(
+  data = results, 
+  x_var = "timepoints_used",        
+  group_var = "autocorr",             
+  x_label = "Time Points Used", 
+  group_label = "Autoregressive effects", 
+  plot_title = "Random Intercept Variance as Proportion of Total X Variance",
+  ylim = c(0,1)
+)
+print(plot)
 ```
 
-Check stationarity for more confounders , max eigenvalue is still under 1 for 7 confounders on x and y. Let's also do a visual check of some sequences.
+#### Number of participants
+
+```{r}
+source("functionSource.R")
+results <- N_participants_sim_20250905_014816$results
+
+
+varRIxplot <- plot_varRIx(data = results,
+                          x_var = "timepoints_used",
+                          group_var = "N_participants",
+                          x_label = "Timepoints used",
+                          group_label = "Sample size",
+                          plot_title = 
+                            "VarRIx over timepoints by sample size")
+print(varRIxplot)
+
+biasPlots <- plot_crosslag_bias(
+  data = results,
+  x_var = "timepoints_used",
+  group_var = "N_participants",
+  true_bx = .1, true_by = .1,
+  x_label = "Timepoints used",
+  group_label = "Sample size",
+  title_suffix = "by number of participants"
+)
+print(biasPlots)
+
+plot <- plot_varRIx_proportion_auto(
+  data = results, 
+  x_var = "timepoints_used",        
+  group_var = "N_participants",             
+  x_label = "Time Points Used", 
+  group_label = "Sample size", 
+  plot_title = "Random Intercept Variance as Proportion of Total X Variance",
+  ylim = c(0,1)
+)
+print(plot)
+```
+
+#### Number of confounders
+
+```{r}
+source("functionSource.R")
+results <- N_confounder_sim_20250905_135144$results
+
+
+varRIxplot <- plot_varRIx(data = results,
+                          x_var = "timepoints_used",
+                          group_var = "N_confounders",
+                          x_label = "Timepoints used",
+                          group_label = "Number of unobserved confounders",
+                          plot_title = 
+                            "VarRIx over timepoints by number of unobserved confounders")
+
+print(varRIxplot)
+
+biasPlots <- plot_crosslag_bias(
+  data = results,
+  x_var = "timepoints_used",
+  group_var = "N_confounders",
+  true_bx = .1, true_by = .1,
+  x_label = "Timepoints used",
+  group_label = "Number of unobserved confounders",
+  title_suffix = "by number of unobserved confounders"
+)
+print(biasPlots)
+
+plot <- plot_varRIx_proportion_auto(
+  data = results, 
+  x_var = "timepoints_used",        
+  group_var = "N_confounders",             
+  x_label = "Time Points Used", 
+  group_label = "Number of unobserved confounders", 
+  plot_title = "Random Intercept Variance as Proportion of Total X Variance",
+  ylim = c(0,1)
+)
+print(plot)
+```
+
+```{r}
+source("functionSource.R")
+results <- N_confounder_sim_20250905_135144$results
+
+
+varRIxplot <- plot_varRIx(data = results,
+                          x_var = "timepoints_used",
+                          group_var = "N_confounders",
+                          x_label = "Timepoints used",
+                          group_label = "Number of unobserved confounders",
+                          plot_title = 
+                            "VarRIx over timepoints by number of unobserved confounders 
+                          (cropped y dimension)",
+                          ylim = c(0, .25))
+
+print(varRIxplot)
+```
+
+### Sequence visualisation
+
+Check stationarity for more confounders , max eigenvalue is still under 1 for 7 confounders on x and y. Data generating mechanism function has a warning message built in that warns if the max eigenvalue \> 1, and / or sigma is not positive semidefinite. Let's also do a visual check of some sequences.
 
 ```{r}
 source("functionSource.R")
 
-df <- DGM(n_x_confounders = 7, n_y_confounders = 7, timepoints = 2000)
+df <- DGM(n_x_confounders = 7, n_y_confounders = 7, 
+          autocorr_effects = .1,
+          timepoints = 2000)
+
+plot_xy_sequences(df$data, 
+                  timepoints = df$parameters$timepoints, n_participants = 3)
+
+df <- DGM(n_x_confounders = 7, n_y_confounders = 7, 
+          autocorr_effects = .2,
+          timepoints = 2000)
+
+plot_xy_sequences(df$data, 
+                  timepoints = df$parameters$timepoints, n_participants = 3)
+
+df <- DGM(n_x_confounders = 7, n_y_confounders = 7, 
+          autocorr_effects = .3,
+          timepoints = 2000)
 
 plot_xy_sequences(df$data, 
                   timepoints = df$parameters$timepoints, n_participants = 3)
 ```
+
+The more confounders, and the stronger the autocorrelation effects are, the smaller the frequency of the fluctuations around the mean become.
+
+### Analytical Formulation for variance
+
+We are in luck! The DGM function provided by Bailey already uses the covariance matrix of the observed formula's. I've added it to the returned parameters under StatCOVmatrix.
+
+```{r}
+source("functionSource.R")
+
+test <- DGM(autocorr_effects = .3, timepoints = 3)
+
+Sigma <- as.data.frame(test$parameters$StatCOVmatrix)
+Sigma[2,2]
+Sigma[1,1]
+```
+
+Allowing us to extract the variance of X and Y, along with other variables. This is great, now let's use it to plot the proportion. I added another plotting function to the source file which accomplishes this.
+
+```{r}
+source("functionSource.R")
+
+data <- larger_corrected_autocorr_sim_20250914_125635$results
+
+# Basic usage - only autocorr varies, timepoints fixed at 3 for population variance
+plot <- plot_varRIx_proportion_auto(
+  data = data, 
+  x_var = "timepoints_used",        
+  group_var = "autocorr",             
+  x_label = "Time Points Used", 
+  group_label = "Autocorrelation", 
+  plot_title = "Random Intercept Variance as Proportion of Total X Variance",
+  ylim = c(0,1)
+)
+print(plot)
+```
+
+### MRI-CLPM
+
+Get model specification for the new model (update function, check identification)
+
+```{r}
+source("functionSource.R")
+
+data <- DGM(timepoints = 30)
+
+#fitRICLPM  <- sem(generate_riclpm(60), data$data)
+#fitZeroMRICLPM <- sem(generate_segmented_riclpm(60,5,across_seg_cov = "zero"), data$data)
+fitFreeMRICLPM <- sem(generate_segmented_riclpm(30,5,across_seg_cov = "free"),
+                      data$data)
+fitFreeMRICLPM2 <- sem(generate_segmented_riclpm(30,3,across_seg_cov = "free"),
+                      data$data)
+#summary(fitRICLPM)
+#summary(fitZeroMRICLPM)
+summary(fitFreeMRICLPM)
+summary(fitFreeMRICLPM2)
+view(lavInspect(fitFreeMRICLPM, "cov.lv"))
+```
+
+Let's set up a simulation analysing the bias over time when using a normal RI-CLPM versus the new MRI-CLPM (or segmented RI-CLPM (SRI-CLPM)?). So two lines over time, with conditions set to vary the autoregressive effects (.1,.2,.3). Minimum timepoints analysed 12, increasing in steps of 4, with a timespan of RI's of 4 and a maximum of 80.
+
+```{r}
+source("functionSource.R")
+
+# Simulation parameters
+autocorr_levels <- c(0.1, 0.2, 0.3)
+timepoints_seq <- seq(12, 80, by = 4)
+timespan_ri <- 4
+filename_prefix <- "riclpm_vs_mriclpm_bias"
+
+# Create metadata structure
+data_struct <- create_metadata()
+
+# True parameter values from DGM (default beta_focal = 0.1)
+true_bx <- 0.1
+true_by <- 0.1
+
+# Loop over autocorrelation levels
+for (a in seq_along(autocorr_levels)) {
+  cat("Starting simulation for autocorr = ", autocorr_levels[a], "\n")
+  
+  # Generate data with current autocorrelation level
+  data <- DGM(N = 20000, 
+              autocorr_effects = autocorr_levels[a],
+              timepoints = max(timepoints_seq))
+  
+  # Initialize storage for this autocorr condition
+  condition_results <- data.frame(
+    autocorr = numeric(),
+    timepoints_used = integer(),
+    model_type = character(),  
+    varRIx = numeric(),
+    varRIy = numeric(),
+    convergence = logical(),
+    fit_measures = I(list()),
+    coefficients = I(list()),
+    processing_time = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop over timepoints
+  for (i in timepoints_seq) {
+    cat("  Analyzing ", i, " timepoints...\n")
+    
+    # --- FIT STANDARD RI-CLPM ---
+    start_time_riclpm <- Sys.time()
+    
+    modelSpec_riclpm <- generate_riclpm(i)
+    
+    fit_riclpm <- sem(model = modelSpec_riclpm, data = data$data)
+    
+    converged_riclpm <- lavInspect(fit_riclpm, "converged")
+    fit_measures_riclpm <- fitMeasures(fit_riclpm, c("chisq", "df", "pvalue", 
+                                                      "cfi", "tli", "rmsea", "srmr"))
+    coeff_riclpm <- if(converged_riclpm) {coef(fit_riclpm)} else {NULL}
+    
+    condition_results <- rbind(condition_results, data.frame(
+      autocorr = autocorr_levels[a],
+      timepoints_used = i,
+      model_type = "RI-CLPM",
+      varRIx = if(converged_riclpm) coef(fit_riclpm)["varRIx"] else NA,
+      varRIy = if(converged_riclpm) coef(fit_riclpm)["varRIy"] else NA,
+      convergence = converged_riclpm,
+      fit_measures = I(list(fit_measures_riclpm)),
+      coefficients = I(list(coeff_riclpm)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_riclpm, 
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_riclpm)
+    
+    # --- FIT MRI-CLPM (Segmented RI-CLPM with Equal Covariances) ---
+    start_time_mriclpm_equal <- Sys.time()
+    
+    modelSpec_mriclpm_equal <- generate_segmented_riclpm(i, timespan = timespan_ri,
+                                                          across_seg_cov = "equal")
+    
+    fit_mriclpm_equal <- sem(model = modelSpec_mriclpm_equal, data = data$data)
+    
+    converged_mriclpm_equal <- lavInspect(fit_mriclpm_equal, "converged")
+    fit_measures_mriclpm_equal <- fitMeasures(fit_mriclpm_equal, 
+                                              c("chisq", "df", "pvalue",
+                                                "cfi", "tli", "rmsea", "srmr"))
+    coeff_mriclpm_equal <- if(converged_mriclpm_equal)
+                             {coef(fit_mriclpm_equal)} else {NULL}
+    
+    condition_results <- rbind(condition_results, data.frame(
+      autocorr = autocorr_levels[a],
+      timepoints_used = i,
+      model_type = "MRI-CLPM-Equal",
+      varRIx = if(converged_mriclpm_equal) {
+        # For MRI-CLPM, sum variances across segments
+        ri_vars <- grep("^varRIx[0-9]+$", names(coef(fit_mriclpm_equal)), 
+                        value = TRUE)
+        sum(coef(fit_mriclpm_equal)[ri_vars])
+      } else NA,
+      varRIy = if(converged_mriclpm_equal) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coef(fit_mriclpm_equal)), 
+                        value = TRUE)
+        sum(coef(fit_mriclpm_equal)[ri_vars])
+      } else NA,
+      convergence = converged_mriclpm_equal,
+      fit_measures = I(list(fit_measures_mriclpm_equal)),
+      coefficients = I(list(coeff_mriclpm_equal)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_mriclpm_equal,
+                                            units = "secs")),
+                                   stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_mriclpm_equal)
+    
+    # --- FIT MRI-CLPM (Segmented RI-CLPM with Zero Covariances) ---
+    start_time_mriclpm_zero <- Sys.time()
+    
+    modelSpec_mriclpm_zero <- generate_segmented_riclpm(i, timespan = timespan_ri, 
+                                                         across_seg_cov = "zero")
+    
+    fit_mriclpm_zero <- sem(model = modelSpec_mriclpm_zero, data = data$data)
+    
+    converged_mriclpm_zero <- lavInspect(fit_mriclpm_zero, "converged")
+    fit_measures_mriclpm_zero <- fitMeasures(fit_mriclpm_zero, 
+                                             c("chisq", "df", "pvalue",
+                                               "cfi", "tli", "rmsea", "srmr"))
+    coeff_mriclpm_zero <- if(converged_mriclpm_zero)
+      {coef(fit_mriclpm_zero)}else{NULL}
+    
+    condition_results <- rbind(condition_results, data.frame(
+      autocorr = autocorr_levels[a],
+      timepoints_used = i,
+      model_type = "MRI-CLPM-Zero",
+      varRIx = if(converged_mriclpm_zero) {
+        # For MRI-CLPM, sum variances across segments
+        ri_vars <- grep("^varRIx[0-9]+$", names(coef(fit_mriclpm_zero)), 
+                        value = TRUE)
+        sum(coef(fit_mriclpm_zero)[ri_vars])
+      } else NA,
+      varRIy = if(converged_mriclpm_zero) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coef(fit_mriclpm_zero)), 
+                        value = TRUE)
+        sum(coef(fit_mriclpm_zero)[ri_vars])
+      } else NA,
+      convergence = converged_mriclpm_zero,
+      fit_measures = I(list(fit_measures_mriclpm_zero)),
+      coefficients = I(list(coeff_mriclpm_zero)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_mriclpm_zero,
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_mriclpm_zero)
+    gc()
+  }
+  
+  # Add condition results to main data structure
+  data_struct$results <- rbind(data_struct$results, condition_results)
+  
+  # Save and clear memory after each autocorr condition
+  filename <- save_clear(data_struct, filename_prefix)
+  
+  cat("Completed simulation for autocorr = ", autocorr_levels[a], "\n\n")
+  
+  rm(data, condition_results)
+  gc()
+}
+
+cat("All simulations completed!\n")
+```
+
+```{r}
+# Generate plots
+cat("Generating plots...\n")
+
+# Plot bias in cross-lagged parameters across timepoints
+for (a_level in autocorr_levels) {
+  subset_data <- data_struct$results[data_struct$results$autocorr == a_level, ]
+  
+  bias_plots <- plot_crosslag_bias(
+    data = subset_data,
+    x_var = "timepoints_used",
+    group_var = "model_type",
+    true_bx = true_bx,
+    true_by = true_by,
+    x_label = "Number of Timepoints",
+    group_label = "Model Type",
+    title_suffix = paste0("Autocorr = ", a_level)
+  )
+  
+  # Save plots
+  ggsave(paste0("bias_bx_autocorr_", a_level, ".png"), 
+         plot = bias_plots$bx_plot, width = 10, height = 6)
+  ggsave(paste0("bias_by_autocorr_", a_level, ".png"),
+         plot = bias_plots$by_plot, width = 10, height = 6)
+}
+
+cat("Plots saved successfully!\n")
+```
+
+#### Timespan
+
+Explorative simulation for the choice of timespan length, along with verifying the desirable unbiased properties of the model.
+
+```{r}
+source("functionSource.R")
+
+# Simulation parameters
+autocorr_level <- 0.2  # Fix at one level for simplicity
+timespan_values <- c(4, 8, 12)
+max_timepoints <- 60
+min_timepoints <- 10
+filename_prefix <- "timespan_exploration_free"
+
+# Create metadata structure
+data_struct <- create_metadata()
+
+# True parameter values from DGM
+true_bx <- 0.1
+true_by <- 0.1
+
+cat("Starting timespan exploration simulation (Free Covariances)\n")
+
+# Generate data once with maximum timepoints
+data <- DGM(N = 20000, 
+            autocorr_effects = autocorr_level,
+            timepoints = max_timepoints)
+
+# Initialize storage
+condition_results <- data.frame(
+  timespan = integer(),
+  timepoints_used = integer(),
+  model_type = character(),  
+  varRIx = numeric(),
+  varRIy = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  bias_bx = numeric(),
+  bias_by = numeric(),
+  convergence = logical(),
+  fit_measures = I(list()),
+  coefficients = I(list()),
+  processing_time = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop over timespan values
+for (ts in timespan_values) {
+  cat("\n--- Timespan = ", ts, " ---\n")
+  
+  # Generate sequence of timepoints that are multiples of this timespan
+  # between min_timepoints and max_timepoints
+  timepoints_seq <- seq(ts, max_timepoints, by = ts)
+  timepoints_seq <- timepoints_seq[timepoints_seq >= min_timepoints]
+  
+  cat("Timepoints to analyze:", paste(timepoints_seq, collapse = ", "), "\n")
+  
+  # Loop over timepoints
+  for (i in timepoints_seq) {
+    cat("  Analyzing ", i, " timepoints with timespan ", ts, "...\n")
+    
+    # --- FIT STANDARD RI-CLPM (for comparison) ---
+    start_time_riclpm <- Sys.time()
+    
+    modelSpec_riclpm <- generate_riclpm(i)
+    fit_riclpm <- sem(model = modelSpec_riclpm, data = data$data,
+                      estimator = "MLR",
+                      optim.method = "nlminb",
+                      control = list(eval.max = 2000, iter.max = 1000))
+    
+    converged_riclpm <- lavInspect(fit_riclpm, "converged")
+    fit_measures_riclpm <- fitMeasures(fit_riclpm, c("chisq", "df", "pvalue", 
+                                                      "cfi", "tli", "rmsea", "srmr"))
+    coeff_riclpm <- if(converged_riclpm) {coef(fit_riclpm)} else {NULL}
+    
+    bx_riclpm <- if(converged_riclpm && "bx" %in% names(coeff_riclpm)) coeff_riclpm["bx"] else NA
+    by_riclpm <- if(converged_riclpm && "by" %in% names(coeff_riclpm)) coeff_riclpm["by"] else NA
+    
+    condition_results <- rbind(condition_results, data.frame(
+      timespan = NA,  # Standard RI-CLPM doesn't have timespan
+      timepoints_used = i,
+      model_type = "RI-CLPM",
+      varRIx = if(converged_riclpm) coeff_riclpm["varRIx"] else NA,
+      varRIy = if(converged_riclpm) coeff_riclpm["varRIy"] else NA,
+      bx = bx_riclpm,
+      by = by_riclpm,
+      bias_bx = bx_riclpm - true_bx,
+      bias_by = by_riclpm - true_by,
+      convergence = converged_riclpm,
+      fit_measures = I(list(fit_measures_riclpm)),
+      coefficients = I(list(coeff_riclpm)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_riclpm, 
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_riclpm)
+    
+    # --- FIT MRI-CLPM with Free Covariances ---
+    start_time_mriclpm_free <- Sys.time()
+    
+    modelSpec_mriclpm_free <- generate_segmented_riclpm(i, timespan = ts, 
+                                                         across_seg_cov = "free")
+    fit_mriclpm_free <- sem(model = modelSpec_mriclpm_free, data = data$data,
+                            estimator = "MLR",
+                            optim.method = "nlminb",
+                            control = list(eval.max = 2000, iter.max = 1000))
+    
+    converged_mriclpm_free <- lavInspect(fit_mriclpm_free, "converged")
+    fit_measures_mriclpm_free <- fitMeasures(fit_mriclpm_free, c("chisq", "df", "pvalue",
+                                                                  "cfi", "tli", "rmsea", "srmr"))
+    coeff_mriclpm_free <- if(converged_mriclpm_free) {coef(fit_mriclpm_free)} else {NULL}
+    
+    bx_free <- if(converged_mriclpm_free && "bx" %in% names(coeff_mriclpm_free)) coeff_mriclpm_free["bx"] else NA
+    by_free <- if(converged_mriclpm_free && "by" %in% names(coeff_mriclpm_free)) coeff_mriclpm_free["by"] else NA
+    
+    condition_results <- rbind(condition_results, data.frame(
+      timespan = ts,
+      timepoints_used = i,
+      model_type = "MRI-CLPM-Free",
+      varRIx = if(converged_mriclpm_free) {
+        ri_vars <- grep("^varRIx[0-9]+$", names(coeff_mriclpm_free), value = TRUE)
+        sum(coeff_mriclpm_free[ri_vars])
+      } else NA,
+      varRIy = if(converged_mriclpm_free) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coeff_mriclpm_free), value = TRUE)
+        sum(coeff_mriclpm_free[ri_vars])
+      } else NA,
+      bx = bx_free,
+      by = by_free,
+      bias_bx = bx_free - true_bx,
+      bias_by = by_free - true_by,
+      convergence = converged_mriclpm_free,
+      fit_measures = I(list(fit_measures_mriclpm_free)),
+      coefficients = I(list(coeff_mriclpm_free)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_mriclpm_free,
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_mriclpm_free)
+    
+    # --- FIT MRI-CLPM with Zero Covariances ---
+    start_time_mriclpm_zero <- Sys.time()
+    
+    modelSpec_mriclpm_zero <- generate_segmented_riclpm(i, timespan = ts, 
+                                                         across_seg_cov = "zero")
+    fit_mriclpm_zero <- sem(model = modelSpec_mriclpm_zero, data = data$data,
+                            estimator = "MLR",
+                            optim.method = "nlminb",
+                            control = list(eval.max = 2000, iter.max = 1000))
+    
+    converged_mriclpm_zero <- lavInspect(fit_mriclpm_zero, "converged")
+    fit_measures_mriclpm_zero <- fitMeasures(fit_mriclpm_zero, c("chisq", "df", "pvalue",
+                                                                  "cfi", "tli", "rmsea", "srmr"))
+    coeff_mriclpm_zero <- if(converged_mriclpm_zero) {coef(fit_mriclpm_zero)} else {NULL}
+    
+    bx_zero <- if(converged_mriclpm_zero && "bx" %in% names(coeff_mriclpm_zero)) coeff_mriclpm_zero["bx"] else NA
+    by_zero <- if(converged_mriclpm_zero && "by" %in% names(coeff_mriclpm_zero)) coeff_mriclpm_zero["by"] else NA
+    
+    condition_results <- rbind(condition_results, data.frame(
+      timespan = ts,
+      timepoints_used = i,
+      model_type = "MRI-CLPM-Zero",
+      varRIx = if(converged_mriclpm_zero) {
+        ri_vars <- grep("^varRIx[0-9]+$", names(coeff_mriclpm_zero), value = TRUE)
+        sum(coeff_mriclpm_zero[ri_vars])
+      } else NA,
+      varRIy = if(converged_mriclpm_zero) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coeff_mriclpm_zero), value = TRUE)
+        sum(coeff_mriclpm_zero[ri_vars])
+      } else NA,
+      bx = bx_zero,
+      by = by_zero,
+      bias_bx = bx_zero - true_bx,
+      bias_by = by_zero - true_by,
+      convergence = converged_mriclpm_zero,
+      fit_measures = I(list(fit_measures_mriclpm_zero)),
+      coefficients = I(list(coeff_mriclpm_zero)),
+      processing_time = as.numeric(difftime(Sys.time(), start_time_mriclpm_zero,
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    rm(fit_mriclpm_zero)
+    gc()
+  }
+}
+
+# Add results to main data structure
+data_struct$results <- condition_results
+
+# Save results
+filename <- save_clear(data_struct, filename_prefix)
+
+cat("\nTimespan exploration simulation completed!\n")
+cat("Results saved to:", filename, "\n")
+```
+
+```{r}
+for (ts in timespan_values) {
+  # Filter data for this specific timespan
+  # Include RI-CLPM baseline and MRI models for this timespan
+  ts_data <- condition_results[
+    (condition_results$model_type == "RI-CLPM" 
+     & condition_results$timepoints_used %% ts == 0) |
+    (condition_results$timespan == ts & 
+       !is.na(condition_results$timespan)),
+  ]
+  
+  # Create plots using the existing function
+  plots <- plot_crosslag_bias(
+    data = ts_data,
+    x_var = "timepoints_used",
+    ylim = c(0,0.05),
+    group_var = "model_type",
+    true_bx = true_bx,
+    true_by = true_by,
+    x_label = "Number of Timepoints",
+    group_label = "Model Type",
+    title_suffix = paste0("Timespan = ", ts)
+  )
+  
+  # Display plots
+  print(plots$bx_plot)
+  print(plots$by_plot)
+}
+```
+
+#### Questions
+
+Results seem to imply freely estimating covariances between RI's is always desirable. Could we think of a reason to constrain them?
+
+Could imposing an autoregressive structure on the covariances be used to say something about the stability at the between person level (or could we even use our estimated covariances in the free model for this?)? Just looking at the covariances between RI's seems to betray some sort of autoregressive structure, which is expected with decaying stability.
+
+It seems that when using the MRI-CLPM-Free we seem to want to estimate as many RI's on as small a timespan as possible. What are the optimal and threshold values for timespan? What does estimating a RI on 1 timepoint imply? After trying some stuff, timespan of 1 is not identified, 2 seems to lead to more bias, but this should be analysed in a better simulation.
+
+### Other DGM's
+
+It would be worth my time to also run some simulations to look at model performance under different DGM's (e.g. a standard RI-CLPM with stable between person trait, unmeasured time-invariant confounding or a CLPM).

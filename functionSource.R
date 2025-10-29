@@ -14,7 +14,8 @@ DGM <- function(N = 20000,
                 beta_covfocal = 0.1,
                 beta_covnofocal = 0.01,
                 sigma = 0.5,
-                seed = 42) {
+                seed = 427) 
+  {
   
   # Load required libraries
   if (!require(mvtnorm)) {
@@ -105,6 +106,7 @@ DGM <- function(N = 20000,
       beta_covfocal = beta_covfocal,
       beta_covnofocal = beta_covnofocal,
       sigma = sigma,
+      StatCOVmatrix = Sigma1,
       max_eigenvalue = max_eigenvalue
     ),
     coefficient_matrix = A
@@ -178,12 +180,12 @@ save_clear <- function(results, filename_prefix = "sim_results"){
 
 generate_riclpm <- function(T) {
   
-  # --- 1. Input Validation ---
-  if (!is.numeric(T) || T <= 1 || T %% 1 != 0) {
-    stop("T must be an integer greater than 1.")
+  # 1. Input Validation
+  if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
+    stop("T must be an integer greater or equal to 3.")
   }
   
-  # --- 2. Procedurally Generate Model Components ---
+  # 2. Generate Model Components
   
   # Random Intercepts (RIx and RIy)
   ri_x <- sprintf("RIx =~ %s", paste(sprintf("1*x%d", 1:T), collapse = " + "))
@@ -203,42 +205,424 @@ generate_riclpm <- function(T) {
   res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
   
   # Variances of within-person components (all timepoints)
-  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
-  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
+  var_wx <- paste(sprintf("wx%d ~~ res_var*wx%d", 1:T, 1:T), collapse = "\n") # Added res_var label
+  var_wy <- paste(sprintf("wy%d ~~ res_var*wy%d", 1:T, 1:T), collapse = "\n") # Added res_var label and constrained equal
   
   # Fix observed variances to zero
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
   
-  # --- 3. Assemble Final Model String ---
+  # 3. Assemble Final Model String
   
-  model_string <- paste(
+  components <- c(
     "# 1. Random Intercepts", ri_x, ri_y,
-    "# 2. Within-person components", wx_defs, wy_defs,
-    "# 3. Autoregressive and cross-lagged paths", paths_wx, paths_wy,
-    "# 4. Covariances",
-    "wx1 ~~ wy1 # Covariance at T1",
+    "\n# 2. Within-person components (measurement)", wx_defs, wy_defs,
+    "\n# 3. Autoregressive and cross-lagged paths", paths_wx, paths_wy,
+    "\n# 4. Covariances",
+    "wx1 ~~ T1_cov*wy1 # Covariance at T1",
     res_covs,
-    "# 5. (Co)variances of Random Intercepts",
+    "\n# 5. (Co)variances of Random Intercepts",
     "RIx ~~ varRIx*RIx",
     "RIy ~~ varRIy*RIy",
     "RIx ~~ covRI*RIy",
-    "# 6. (Residual) variances of within-person components",
+    "\n# 6. (Residual) variances of within-person components (constrained equal)",
     var_wx,
     var_wy,
-    "# 7. Fix observed variances to zero",
+    "\n# 7. Fix observed variances to zero",
     zero_var_x,
     zero_var_y,
-    "# 8. Fix RI covariances with first state to zero",
-    "wx1 ~~ 0*RIx",
-    "wx1 ~~ 0*RIy",
-    "wy1 ~~ 0*RIx",
-    "wy1 ~~ 0*RIy",
-    sep = "\n\n" # Separate sections with a blank line for readability
+    "\n# 8. Fix RI covariances with first state to zero",
+    "wx1 ~~ 0*RIx", "wx1 ~~ 0*RIy", "wy1 ~~ 0*RIx", "wy1 ~~ 0*RIy"
   )
+  
+  # add together, skip empty strings and add linebreaks
+  model_string <- paste(components[components != ""], collapse = "\n")
   
   return(model_string)
 }
 
+generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal") {
+  
+  # --- 1. Input Validation ---
+  if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
+    stop("T must be an integer greater or equal to 3.")
+  }
+  
+  if (!is.numeric(timespan) || timespan <= 0 || timespan %% 1 != 0) {
+    stop("timespan must be a positive integer.")
+  }
+  
+  if (timespan > T) {
+    stop("timespan cannot be greater than T.")
+  }
+  
+  if (!across_seg_cov %in% c("equal", "zero", "free")) {
+    stop("across_seg_cov must be either 'equal', 'zero', or 'free'.")
+  }
+  
+  # --- 2. Determine Number of Segments ---
+  n_segments <- ceiling(T / timespan)
+  
+  # Create a mapping of timepoints to segments
+  timepoint_to_segment <- rep(1:n_segments, each = timespan)[1:T]
+  
+  # --- 3. Generate Random Intercepts for Each Segment ---
+  
+  ri_definitions <- c()
+  
+  for (seg in 1:n_segments) {
+    # Find which timepoints belong to this segment
+    tp_in_seg <- which(timepoint_to_segment == seg)
+    
+    # Define RIx for this segment
+    ri_x_seg <- sprintf("RIx%d =~ %s", seg, 
+                        paste(sprintf("1*x%d", tp_in_seg), collapse = " + "))
+    
+    # Define RIy for this segment
+    ri_y_seg <- sprintf("RIy%d =~ %s", seg, 
+                        paste(sprintf("1*y%d", tp_in_seg), collapse = " + "))
+    
+    ri_definitions <- c(ri_definitions, ri_x_seg, ri_y_seg) # add new definitions to list
+  }
+  
+  # --- 4. Within-person Component Definitions ---
+  wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
+  wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
+  
+  # --- 5. Autoregressive and Cross-lagged Paths ---
+  if (T > 1) {
+    timepoints_reg <- 2:T
+    lagged_timepoints <- 1:(T - 1)
+    paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+    paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+  } else {
+    paths_wx <- ""
+    paths_wy <- ""
+  }
+  
+  # --- 6. Constrained Correlated Residuals ---
+  if (T > 1) {
+    res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    res_covs <- ""
+  }
+  
+  # --- 7. Variances of Within-person Components ---
+  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
+  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
+  
+  # --- 8. Fix Observed Variances to Zero ---
+  zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
+  zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
+  
+  # --- 9. Random Intercept Variances and Covariances ---
+  
+  # Within-segment covariances (RIx and RIy at same timespan)
+  ri_within_seg_covs <- c()
+  for (seg in 1:n_segments) {
+    ri_within_seg_covs <- c(ri_within_seg_covs,
+                            sprintf("RIx%d ~~ varRIx%d*RIx%d", seg, seg, seg),
+                            sprintf("RIy%d ~~ varRIy%d*RIy%d", seg, seg, seg),
+                            sprintf("RIx%d ~~ covRI%d*RIy%d", seg, seg, seg))
+  }
+  
+  # Across-segment covariances
+  ri_across_seg_covs <- c()
+  across_seg_label <- ""
+  
+  if (n_segments > 1) {
+    if (across_seg_cov == "equal") {
+      # Constrained equal: all covariances share the same parameter
+      across_seg_label <- "(Constrained Equal)"
+      for (seg1 in 1:(n_segments - 1)) {
+        for (seg2 in (seg1 + 1):n_segments) {
+          # All within-variable RIx covariances constrained equal
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ covRIx_across*RIx%d", seg1, seg2))
+          # All within-variable RIy covariances constrained equal
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIy%d ~~ covRIy_across*RIy%d", seg1, seg2))
+          # All RIx-RIy across-segment covariances constrained equal
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ covRIxy_across*RIy%d", seg1, seg2))
+          # All RIy-RIx across-segment covariances constrained equal
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIy%d ~~ covRIyx_across*RIx%d", seg1, seg2))
+        }
+      }
+    } else if (across_seg_cov == "zero") {
+      # Fixed to zero: independent confounding across segments
+      across_seg_label <- "(Fixed to Zero)"
+      for (seg1 in 1:(n_segments - 1)) {
+        for (seg2 in (seg1 + 1):n_segments) {
+          # Fix all across-segment covariances to zero
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ 0*RIx%d", seg1, seg2),
+                                  sprintf("RIy%d ~~ 0*RIy%d", seg1, seg2),
+                                  sprintf("RIx%d ~~ 0*RIy%d", seg1, seg2),
+                                  sprintf("RIy%d ~~ 0*RIx%d", seg1, seg2))
+        }
+      }
+    } else if (across_seg_cov == "free") {
+      # Freely estimate all covariances with unique labels
+      across_seg_label <- "(Freely Estimated)"
+      for (seg1 in 1:(n_segments - 1)) {
+        for (seg2 in (seg1 + 1):n_segments) {
+          # Each covariance gets a unique parameter label
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ covRIx_%d_%d*RIx%d", seg1, seg1, seg2, seg2),
+                                  sprintf("RIy%d ~~ covRIy_%d_%d*RIy%d", seg1, seg1, seg2, seg2),
+                                  sprintf("RIx%d ~~ covRIxy_%d_%d*RIy%d", seg1, seg1, seg2, seg2),
+                                  sprintf("RIy%d ~~ covRIyx_%d_%d*RIx%d", seg1, seg1, seg2, seg2))
+        }
+      }
+    }
+  }
+  
+  # --- 10. Fix RI Covariances with First State to Zero ---
+  ri_first_state_zero <- c()
+  for (seg in 1:n_segments) {
+    ri_first_state_zero <- c(ri_first_state_zero,
+                             sprintf("wx1 ~~ 0*RIx%d", seg),
+                             sprintf("wx1 ~~ 0*RIy%d", seg),
+                             sprintf("wy1 ~~ 0*RIx%d", seg),
+                             sprintf("wy1 ~~ 0*RIy%d", seg))
+  }
+  
+  # --- 11. Assemble Final Model String ---
+  
+  # Build components with proper separation
+  components <- c(
+    "# 1. Random Intercepts (Segmented)",
+    paste(ri_definitions, collapse = "\n"),
+    "\n# 2. Within-person components",
+    wx_defs,
+    wy_defs,
+    "\n# 3. Autoregressive and cross-lagged paths",
+    paths_wx,
+    paths_wy,
+    "\n# 4. Covariances",
+    "wx1 ~~ wy1 # Covariance at T1",
+    res_covs,
+    "\n# 5. Within-segment (Co)variances of Random Intercepts",
+    paste(ri_within_seg_covs, collapse = "\n"),
+    sprintf("\n# 6. Across-segment (Lateral) covariances of Random Intercepts %s", 
+            ifelse(n_segments > 1, across_seg_label, "")),
+    if (length(ri_across_seg_covs) > 0) paste(ri_across_seg_covs, collapse = "\n") else "# (No across-segment covariances for single segment)",
+    "\n# 7. (Residual) variances of within-person components",
+    var_wx,
+    var_wy,
+    "\n# 8. Fix observed variances to zero",
+    zero_var_x,
+    zero_var_y,
+    "\n# 9. Fix RI covariances with first state to zero",
+    paste(ri_first_state_zero, collapse = "\n")
+  )
+  
+  # Remove any empty strings and collapse with newlines
+  components <- components[components != ""]
+  model_string <- paste(components, collapse = "\n")
+  
+  return(model_string)
+}
 
+################################################################################
+#                             ---- PLOTTING ----                               #
+################################################################################
+
+# VARIANCE OF RANDOM INTERCEPT FOR X
+plot_varRIx <- function(data, x_var, group_var, x_label, group_label, plot_title, 
+                        xlim = NULL, ylim = NULL) {
+  
+  varRix_plot <- ggplot(data = data, 
+                        aes(x = .data[[x_var]], 
+                            y = varRIx, 
+                            group = factor(.data[[group_var]]), 
+                            color = factor(.data[[group_var]]))) +
+    geom_line(linewidth = 1) +  # Add the line layer
+    geom_point(size = 2) +     # Add points to mark the actual data points
+    
+    # --- Customize labels and titles ---
+    labs(title = plot_title,
+         x = x_label,
+         y = "varRIx Value",
+         color = group_label) + # This renames the legend title
+    
+    # --- Apply a clean theme ---
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16), # Center the title
+      legend.position = "bottom" # Move legend to the bottom
+    )
+  
+  # Add axis limits if specified
+  if (!is.null(xlim)) {
+    varRix_plot <- varRix_plot + xlim(xlim[1], xlim[2])
+  }
+  if (!is.null(ylim)) {
+    varRix_plot <- varRix_plot + ylim(ylim[1], ylim[2])
+  }
+  
+  return(varRix_plot)
+}
+
+# BIAS
+plot_crosslag_bias <- function(data, x_var, group_var, true_bx, true_by, 
+                               x_label, group_label, title_suffix, 
+                               xlim = NULL, ylim = NULL) {
+  
+  # Extract coefficients and calculate bias
+  data$bx <- sapply(data$coefficients, function(coef_list) {
+    if(!is.null(coef_list) && "bx" %in% names(coef_list)) {
+      return(coef_list["bx"])
+    } else {
+      return(NA)
+    }
+  })
+  
+  data$by <- sapply(data$coefficients, function(coef_list) {
+    if(!is.null(coef_list) && "by" %in% names(coef_list)) {
+      return(coef_list["by"])
+    } else {
+      return(NA)
+    }
+  })
+  
+  data$bias_bx <- data$bx - true_bx
+  data$bias_by <- data$by - true_by
+  
+  # Plot bias for bx (Y -> X cross-lagged path)
+  bias_bx_plot <- ggplot(data = data, 
+                         aes(x = .data[[x_var]], 
+                             y = bias_bx, 
+                             group = factor(.data[[group_var]]), 
+                             color = factor(.data[[group_var]]))) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+    labs(title = paste0("Bias in Cross-lagged Path bx (Y→X) - ", title_suffix),
+         x = x_label,
+         y = "Bias in bx (Estimated - True)",
+         color = group_label) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16),
+      legend.position = "bottom"
+    )
+  
+  # Add axis limits if specified for bx plot
+  if (!is.null(xlim)) {
+    bias_bx_plot <- bias_bx_plot + xlim(xlim[1], xlim[2])
+  }
+  if (!is.null(ylim)) {
+    bias_bx_plot <- bias_bx_plot + ylim(ylim[1], ylim[2])
+  }
+  
+  # Plot bias for by (X -> Y cross-lagged path)  
+  bias_by_plot <- ggplot(data = data, 
+                         aes(x = .data[[x_var]], 
+                             y = bias_by, 
+                             group = factor(.data[[group_var]]), 
+                             color = factor(.data[[group_var]]))) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+    labs(title = paste0("Bias in Cross-lagged Path by (X→Y) - ", title_suffix),
+         x = x_label,
+         y = "Bias in by (Estimated - True)",
+         color = group_label) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16),
+      legend.position = "bottom"
+    )
+  
+  # Add axis limits if specified for by plot
+  if (!is.null(xlim)) {
+    bias_by_plot <- bias_by_plot + xlim(xlim[1], xlim[2])
+  }
+  if (!is.null(ylim)) {
+    bias_by_plot <- bias_by_plot + ylim(ylim[1], ylim[2])
+  }
+  
+  return(list(bx_plot = bias_bx_plot, by_plot = bias_by_plot))
+}
+
+plot_varRIx_proportion_auto <- function(data, x_var, group_var, x_label, group_label, plot_title, 
+                                        xlim = NULL, ylim = NULL, ...) {
+  
+  # Source the DGM function
+  source("functionSource.R")
+  
+  # Add a column for total variance in X based on conditions in the data
+  data$total_var_x <- sapply(1:nrow(data), function(i) {
+    current_row <- data[i, ]
+    
+    # Create a list of DGM parameters, starting with defaults
+    dgm_params <- list(timepoints = 3)  # Always use 3 for population covariance
+    
+    # Add parameters based on what columns exist in the data
+    if("autocorr" %in% colnames(data)) {
+      dgm_params$autocorr_effects <- current_row$autocorr
+    }
+    
+    if("N_participants" %in% colnames(data)) {
+      dgm_params$N <- current_row$N_participants  # Map N_participants to N
+    }
+    
+    if("N_confounders" %in% colnames(data)) {
+      # Split confounders equally between X and Y variables
+      dgm_params$n_x_confounders <- current_row$N_confounders
+      dgm_params$n_y_confounders <- current_row$N_confounders
+    }
+    
+    # Add any additional parameters passed through ...
+    extra_params <- list(...)
+    dgm_params <- c(dgm_params, extra_params)
+    
+    # Generate DGM parameters for this specific condition
+    dgm_result <- do.call(DGM, dgm_params)
+    
+    # Extract total variance in X for this condition
+    return(dgm_result$parameters$StatCOVmatrix[1,1])
+  })
+  
+  # Calculate proportion of random intercept variance to total variance
+  data$varRIx_proportion <- data$varRIx / data$total_var_x
+  
+  varRix_plot <- ggplot(data = data, 
+                        aes(x = .data[[x_var]], 
+                            y = varRIx_proportion, 
+                            group = factor(.data[[group_var]]), 
+                            color = factor(.data[[group_var]]))) +
+    geom_line(linewidth = 1) +  # Add the line layer
+    geom_point(size = 2) +     # Add points to mark the actual data points
+    
+    # --- Customize labels and titles ---
+    labs(title = plot_title,
+         x = x_label,
+         y = "varRIx Proportion of Total Variance in X",
+         color = group_label) + # This renames the legend title
+    
+    # --- Apply a clean theme ---
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16), # Center the title
+      legend.position = "bottom" # Move legend to the bottom
+    )
+  
+  # Add axis limits if specified
+  if (!is.null(xlim)) {
+    varRix_plot <- varRix_plot + xlim(xlim[1], xlim[2])
+  }
+  if (!is.null(ylim)) {
+    varRix_plot <- varRix_plot + ylim(ylim[1], ylim[2])
+  }
+  
+  return(varRix_plot)
+}
