@@ -480,13 +480,13 @@ data <- DGM(timepoints = 30)
 #fitZeroMRICLPM <- sem(generate_segmented_riclpm(60,5,across_seg_cov = "zero"), data$data)
 fitFreeMRICLPM <- sem(generate_segmented_riclpm(30,5,across_seg_cov = "free"),
                       data$data)
-fitFreeMRICLPM2 <- sem(generate_segmented_riclpm(30,3,across_seg_cov = "free"),
-                      data$data)
+#fitFreeMRICLPM2 <- sem(generate_segmented_riclpm(30,3,across_seg_cov = "free"),
+#                      data$data)
 #summary(fitRICLPM)
 #summary(fitZeroMRICLPM)
 summary(fitFreeMRICLPM)
-summary(fitFreeMRICLPM2)
-view(lavInspect(fitFreeMRICLPM, "cov.lv"))
+#summary(fitFreeMRICLPM2)
+view(lavInspect(fitFreeMRICLPM, "cor.lv"))
 ```
 
 Let's set up a simulation analysing the bias over time when using a normal RI-CLPM versus the new MRI-CLPM (or segmented RI-CLPM (SRI-CLPM)?). So two lines over time, with conditions set to vary the autoregressive effects (.1,.2,.3). Minimum timepoints analysed 12, increasing in steps of 4, with a timespan of RI's of 4 and a maximum of 80.
@@ -924,6 +924,185 @@ Results seem to imply freely estimating covariances between RI's is always desir
 Could imposing an autoregressive structure on the covariances be used to say something about the stability at the between person level (or could we even use our estimated covariances in the free model for this?)? Just looking at the covariances between RI's seems to betray some sort of autoregressive structure, which is expected with decaying stability.
 
 It seems that when using the MRI-CLPM-Free we seem to want to estimate as many RI's on as small a timespan as possible. What are the optimal and threshold values for timespan? What does estimating a RI on 1 timepoint imply? After trying some stuff, timespan of 1 is not identified, 2 seems to lead to more bias, but this should be analysed in a better simulation.
+
+#### Smaller timespans
+
+```{r}
+source("functionSource.R")
+
+# Simulation parameters
+autocorr_level <- 0.2  # Fix at one level for simplicity
+timespan_values <- c(2, 3, 4)
+min_timepoints <- 6  # Start at 6 to ensure all timespans have at least 2 segments
+max_timepoints <- 60
+filename_prefix <- "mriclpm_free_timespan_comparison"
+
+# Create metadata structure
+data_struct <- create_metadata()
+
+# True parameter values from DGM
+true_bx <- 0.1
+true_by <- 0.1
+
+cat("Starting MRI-CLPM Free simulation with varying timespans\n")
+
+# Generate data once with maximum timepoints
+data <- DGM(N = 20000, 
+            autocorr_effects = autocorr_level,
+            timepoints = max_timepoints)
+
+# Initialize storage
+condition_results <- data.frame(
+  timespan = integer(),
+  timepoints_used = integer(),
+  n_segments = integer(),
+  model_type = character(),  
+  varRIx = numeric(),
+  varRIy = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  bias_bx = numeric(),
+  bias_by = numeric(),
+  convergence = logical(),
+  post_check = logical(),
+  fit_measures = I(list()),
+  coefficients = I(list()),
+  processing_time = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop over timespan values
+for (ts in timespan_values) {
+  cat("\n=== Timespan = ", ts, " ===\n")
+  
+  # Generate sequence of timepoints that are multiples of this timespan
+  timepoints_seq <- seq(ts, max_timepoints, by = ts)
+  timepoints_seq <- timepoints_seq[timepoints_seq >= min_timepoints]
+  
+  cat("Timepoints to analyze:", paste(timepoints_seq, collapse = ", "), "\n")
+  cat("Number of models to fit:", length(timepoints_seq), "\n")
+  
+  # Loop over timepoints
+  for (i in timepoints_seq) {
+    
+    # Calculate number of segments for reporting
+    n_seg <- ceiling(i / ts)
+    
+    cat("  Analyzing", i, "timepoints (", n_seg, "segments)...\n")
+    
+    # --- FIT MRI-CLPM with Free Covariances ---
+    start_time <- Sys.time()
+    
+    modelSpec <- generate_segmented_riclpm(i, timespan = ts, 
+                                           across_seg_cov = "free")
+    
+    fit <- tryCatch({
+      sem(model = modelSpec, data = data$data,
+          estimator = "MLR",
+          optim.method = "nlminb",
+          control = list(eval.max = 2000, iter.max = 1000))
+    }, error = function(e) {
+      cat("    ERROR at timepoints =", i, ":", e$message, "\n")
+      return(NULL)
+    })
+    
+    if (!is.null(fit)) {
+      converged <- lavInspect(fit, "converged")
+      post_check <- tryCatch({
+        lavInspect(fit, "post.check")
+      }, error = function(e) {
+        FALSE
+      })
+      
+      fit_measures <- tryCatch({
+        fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+      }, error = function(e) {
+        rep(NA, 7)
+      })
+      
+      coeff <- if(converged) {coef(fit)} else {NULL}
+      
+      bx_est <- if(converged && "bx" %in% names(coeff)) coeff["bx"] else NA
+      by_est <- if(converged && "by" %in% names(coeff)) coeff["by"] else NA
+      
+      # Sum RI variances across segments
+      varRIx_sum <- if(converged) {
+        ri_vars <- grep("^varRIx[0-9]+$", names(coeff), value = TRUE)
+        if(length(ri_vars) > 0) sum(coeff[ri_vars]) else NA
+      } else NA
+      
+      varRIy_sum <- if(converged) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coeff), value = TRUE)
+        if(length(ri_vars) > 0) sum(coeff[ri_vars]) else NA
+      } else NA
+      
+    } else {
+      # Model fitting failed
+      converged <- FALSE
+      post_check <- FALSE
+      fit_measures <- rep(NA, 7)
+      coeff <- NULL
+      bx_est <- NA
+      by_est <- NA
+      varRIx_sum <- NA
+      varRIy_sum <- NA
+    }
+    
+    # Store results
+    condition_results <- rbind(condition_results, data.frame(
+      timespan = ts,
+      timepoints_used = i,
+      n_segments = n_seg,
+      model_type = "MRI-CLPM-Free",
+      varRIx = varRIx_sum,
+      varRIy = varRIy_sum,
+      bx = bx_est,
+      by = by_est,
+      bias_bx = bx_est - true_bx,
+      bias_by = by_est - true_by,
+      convergence = converged,
+      post_check = post_check,
+      fit_measures = I(list(fit_measures)),
+      coefficients = I(list(coeff)),  # This saves ALL coefficients including RI covariances
+      processing_time = as.numeric(difftime(Sys.time(), start_time, 
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    # Clean up
+    if (!is.null(fit)) rm(fit)
+    gc(verbose = FALSE)
+  }
+  
+  cat("Completed timespan", ts, "\n")
+}
+
+# Add results to main data structure
+data_struct$results <- condition_results
+
+# Save results
+filename <- save_clear(data_struct, filename_prefix)
+
+cat("\n=== MRI-CLPM Free simulation completed! ===\n")
+cat("Results saved to:", filename, "\n")
+```
+
+```{r}
+# Plot bias in bx and by
+plot_bias <- plot_crosslag_bias(
+  data = condition_results,
+  x_var = "timepoints_used",
+  group_var = "timespan",
+  true_bx = true_bx,
+  true_by = true_by,
+  x_label = "Number of Timepoints",
+  group_label = "RI Timespan",
+  title_suffix = "MRI-CLPM with Free Covariances"
+)
+
+print(plot_bias$bx_plot)
+print(plot_bias$by_plot)
+```
 
 ### Other DGM's
 
