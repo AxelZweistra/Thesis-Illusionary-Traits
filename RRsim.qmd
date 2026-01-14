@@ -1,0 +1,807 @@
+------------------------------------------------------------------------
+
+---
+title: "Research Report Simulations"
+author: "A.P. Zweistra"
+format: html
+editor: visual
+---
+
+This is the accompanying R code for the research report. For this file to function the functionSource.R file also needs to be present in the working directory. This file contains the implementations of the actual simulations themselves and the visualisations, drawing on functions sourced from the source file.
+
+## Simulation
+
+### Initialisation
+
+Load in functions from the functionSource file and load necessary packages.
+
+```{r}
+## random seed and packages 
+set.seed(427)
+
+library(mvtnorm)
+library(psych)
+library(ggplot2)
+library(reshape)
+library(gridExtra)
+library(lavaan)
+library(reshape2)
+library(tidyverse)
+
+## Function definitions from Bailey
+row <- function( M ){
+    if( ! ( is.matrix(M) && dim(M)[1] == dim(M)[2] && dim(M)[1]>0 ) ){
+        rowM <- NULL
+    } else {
+        F <- dim(M)[1]
+        rowM <- matrix( NA, nrow=F^2, ncol=1)
+        for ( r in (1:F) ) {
+            for( c in (1:F) ) {
+                rowM[ c+F*(r-1), 1 ] <- M[r,c]
+            }
+        }
+    }
+    return( rowM )
+}
+irow <- function( rowM ){
+    if( ! ( !is.null(rowM) && ( is.matrix(rowM) || (is.array(rowM) && length( which( dim(rowM) > 1 ) ) == 1) ) && dim(rowM)[1]>0 && dim(rowM)[2]==1 ) ){
+        M <- NULL
+    } else {
+        F <- sqrt( length( rowM ) )
+        M <- matrix( NA, nrow=F, ncol=F )
+        for ( r in (1:F) ) {
+            for ( c in (1:F) ) {
+                M[r,c] <- rowM[ c+F*(r-1) ]
+            }
+        }
+    }
+    return( M )
+}
+```
+
+### Simulation 1
+
+```{r}
+source("functionSource.R")
+
+# Simulation parameters
+autocorr_level <- 0.2  
+min_timepoints <- 3    # Minimum for RI-CLPM identification
+max_timepoints <- 45
+timepoint_increment <- 3  # fit models every three timepoints
+filename_prefix <- "RR_clpm_vs_riclpm_comparison"
+
+# Create metadata structure
+data_struct <- create_metadata()
+
+# True parameter values from DGM
+true_bx <- 0.1
+true_by <- 0.1
+
+cat("Starting CLPM vs RI-CLPM comparison simulation\n")
+
+# Generate data once with maximum timepoints
+data <- DGM(N = 20000, 
+            autocorr_effects = autocorr_level,
+            timepoints = max_timepoints)
+
+# Initialize storage
+condition_results <- data.frame(
+  timepoints_used = integer(),
+  model_type = character(),  
+  varRIx = numeric(),
+  varRIy = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  ax = numeric(),
+  ay = numeric(),
+  bias_bx = numeric(),
+  bias_by = numeric(),
+  convergence = logical(),
+  post_check = logical(),
+  fit_measures = I(list()),
+  coefficients = I(list()),
+  processing_time = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Generate sequence of timepoints
+timepoints_seq <- seq(min_timepoints, max_timepoints, by = timepoint_increment)
+
+# Loop over timepoints
+for (i in timepoints_seq) {
+  cat("Analyzing", i, "timepoints...\n")
+  cat("Starting CLPM \n")
+  
+  # --- FIT CLPM ---
+  start_time_clpm <- Sys.time()
+  
+  modelSpec_clpm <- generate_clpm(i)
+  
+  fit_clpm <- tryCatch({
+    sem(model = modelSpec_clpm, data = data$data,
+        estimator = "MLR",
+        optim.method = "nlminb",
+        control = list(eval.max = 2000, iter.max = 1000))
+  }, error = function(e) {
+    cat("  CLPM ERROR:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (!is.null(fit_clpm)) {
+    converged_clpm <- lavInspect(fit_clpm, "converged")
+    post_check_clpm <- tryCatch({
+      lavInspect(fit_clpm, "post.check")
+    }, error = function(e) {
+      FALSE
+    })
+    
+    fit_measures_clpm <- tryCatch({
+      fitMeasures(fit_clpm, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+    }, error = function(e) {
+      rep(NA, 7)
+    })
+    
+    coeff_clpm <- if(converged_clpm) {coef(fit_clpm)} else {NULL}
+    
+    bx_clpm <- if(converged_clpm && "bx" %in% names(coeff_clpm)) coeff_clpm["bx"] else NA
+    by_clpm <- if(converged_clpm && "by" %in% names(coeff_clpm)) coeff_clpm["by"] else NA
+    ax_clpm <- if(converged_clpm && "ax" %in% names(coeff_clpm)) coeff_clpm["ax"] else NA
+    ay_clpm <- if(converged_clpm && "ay" %in% names(coeff_clpm)) coeff_clpm["ay"] else NA
+    
+  } else {
+    converged_clpm <- FALSE
+    post_check_clpm <- FALSE
+    fit_measures_clpm <- rep(NA, 7)
+    coeff_clpm <- NULL
+    bx_clpm <- NA
+    by_clpm <- NA
+    ax_clpm <- NA
+    ay_clpm <- NA
+  }
+  
+  condition_results <- rbind(condition_results, data.frame(
+    timepoints_used = i,
+    model_type = "CLPM",
+    varRIx = NA,  # CLPM doesn't have random intercepts
+    varRIy = NA,
+    bx = bx_clpm,
+    by = by_clpm,
+    ax = ax_clpm,
+    ay = ay_clpm,
+    bias_bx = bx_clpm - true_bx,
+    bias_by = by_clpm - true_by,
+    convergence = converged_clpm,
+    post_check = post_check_clpm,
+    fit_measures = I(list(fit_measures_clpm)),
+    coefficients = I(list(coeff_clpm)),
+    processing_time = as.numeric(difftime(Sys.time(), start_time_clpm, 
+                                          units = "secs")),
+    stringsAsFactors = FALSE
+  ))
+  
+  if (!is.null(fit_clpm)) rm(fit_clpm)
+
+  cat("Starting RI-CLPM \n")
+  # --- FIT RI-CLPM ---
+  start_time_riclpm <- Sys.time()
+  
+  modelSpec_riclpm <- generate_riclpm(i)
+  
+  fit_riclpm <- tryCatch({
+    sem(model = modelSpec_riclpm, data = data$data,
+        estimator = "MLR",
+        optim.method = "nlminb",
+        control = list(eval.max = 2000, iter.max = 1000))
+  }, error = function(e) {
+    cat("  RI-CLPM ERROR:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (!is.null(fit_riclpm)) {
+    converged_riclpm <- lavInspect(fit_riclpm, "converged")
+    post_check_riclpm <- tryCatch({
+      lavInspect(fit_riclpm, "post.check")
+    }, error = function(e) {
+      FALSE
+    })
+    
+    fit_measures_riclpm <- tryCatch({
+      fitMeasures(fit_riclpm, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+    }, error = function(e) {
+      rep(NA, 7)
+    })
+    
+    coeff_riclpm <- if(converged_riclpm) {coef(fit_riclpm)} else {NULL}
+    
+    bx_riclpm <- if(converged_riclpm && "bx" %in% names(coeff_riclpm)) coeff_riclpm["bx"] else NA
+    by_riclpm <- if(converged_riclpm && "by" %in% names(coeff_riclpm)) coeff_riclpm["by"] else NA
+    ax_riclpm <- if(converged_riclpm && "ax" %in% names(coeff_riclpm)) coeff_riclpm["ax"] else NA
+    ay_riclpm <- if(converged_riclpm && "ay" %in% names(coeff_riclpm)) coeff_riclpm["ay"] else NA
+    varRIx_riclpm <- if(converged_riclpm && "varRIx" %in% names(coeff_riclpm)) coeff_riclpm["varRIx"] else NA
+    varRIy_riclpm <- if(converged_riclpm && "varRIy" %in% names(coeff_riclpm)) coeff_riclpm["varRIy"] else NA
+    
+  } else {
+    converged_riclpm <- FALSE
+    post_check_riclpm <- FALSE
+    fit_measures_riclpm <- rep(NA, 7)
+    coeff_riclpm <- NULL
+    bx_riclpm <- NA
+    by_riclpm <- NA
+    ax_riclpm <- NA
+    ay_riclpm <- NA
+    varRIx_riclpm <- NA
+    varRIy_riclpm <- NA
+  }
+  
+  condition_results <- rbind(condition_results, data.frame(
+    timepoints_used = i,
+    model_type = "RI-CLPM",
+    varRIx = varRIx_riclpm,
+    varRIy = varRIy_riclpm,
+    bx = bx_riclpm,
+    by = by_riclpm,
+    ax = ax_riclpm,
+    ay = ay_riclpm,
+    bias_bx = bx_riclpm - true_bx,
+    bias_by = by_riclpm - true_by,
+    convergence = converged_riclpm,
+    post_check = post_check_riclpm,
+    fit_measures = I(list(fit_measures_riclpm)),
+    coefficients = I(list(coeff_riclpm)),
+    processing_time = as.numeric(difftime(Sys.time(), start_time_riclpm, 
+                                          units = "secs")),
+    stringsAsFactors = FALSE
+  ))
+  
+  if (!is.null(fit_riclpm)) rm(fit_riclpm)
+  gc(verbose = FALSE)
+}
+
+# Add results to main data structure
+data_struct$results <- condition_results
+
+# Save results
+filename <- save_clear(data_struct, filename_prefix)
+
+cat("\n=== CLPM vs RI-CLPM simulation completed! ===\n")
+cat("Results saved to:", filename, "\n")
+
+```
+
+### Simulation 2
+
+```{r}
+source("functionSource.R")
+
+# Simulation parameters
+autocorr_level <- 0.2  # Default autocorrelation
+timespan_values <- c(2, 4, 6)
+min_timepoints <- 3
+max_timepoints <- 30
+filename_prefix <- "RR_MRICLPM_timespan"
+
+# Create metadata structure
+data_struct <- create_metadata()
+
+# True parameter values from DGM
+true_bx <- 0.1
+true_by <- 0.1
+
+cat("Starting MRI-CLPM Free simulation with varying timespans\n")
+cat("Timespans to test:", paste(timespan_values, collapse = ", "), "\n\n")
+
+# Generate data once with 30 timepoints
+data <- DGM(N = 20000, 
+            autocorr_effects = autocorr_level,
+            timepoints = 30)
+
+# Initialize storage
+condition_results <- data.frame(
+  timespan = integer(),
+  timepoints_used = integer(),
+  n_segments = integer(),
+  model_type = character(),  
+  varRIx = numeric(),
+  varRIy = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  ax = numeric(),
+  ay = numeric(),
+  bias_bx = numeric(),
+  bias_by = numeric(),
+  convergence = logical(),
+  post_check = logical(),
+  fit_measures = I(list()),
+  coefficients = I(list()),
+  processing_time = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop over timespan values
+for (ts in timespan_values) {
+  cat("\n=== Timespan = ", ts, " ===\n")
+  
+  # Generate sequence of timepoints that are multiples of this timespan
+  # between min_timepoints and max_timepoints
+  timepoints_seq <- seq(ts, max_timepoints, by = ts)
+  timepoints_seq <- timepoints_seq[timepoints_seq >= 3]  # Ensure at least 3 timepoints
+  
+  cat("Timepoints to analyze:", paste(timepoints_seq, collapse = ", "), "\n")
+  cat("Number of models to fit:", length(timepoints_seq), "\n")
+  
+  # Loop over timepoints
+  for (i in timepoints_seq) {
+    
+    # Calculate number of segments for reporting
+    n_seg <- ceiling(i / ts)
+    
+    cat("  Analyzing", i, "timepoints (", n_seg, "segments)...\n")
+    
+    # --- FIT MRI-CLPM with Free Covariances ---
+    start_time <- Sys.time()
+    
+    modelSpec <- generate_segmented_riclpm(i, timespan = ts, 
+                                           across_seg_cov = "free")
+    
+    fit <- tryCatch({
+      sem(model = modelSpec, data = data$data,
+          estimator = "MLR",
+          optim.method = "nlminb",
+          control = list(eval.max = 2000, iter.max = 1000))
+    }, error = function(e) {
+      cat("    ERROR at timepoints =", i, ":", e$message, "\n")
+      return(NULL)
+    })
+    
+    if (!is.null(fit)) {
+      converged <- lavInspect(fit, "converged")
+      post_check <- tryCatch({
+        lavInspect(fit, "post.check")
+      }, error = function(e) {
+        FALSE
+      })
+      
+      fit_measures <- tryCatch({
+        fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+      }, error = function(e) {
+        rep(NA, 7)
+      })
+      
+      coeff <- if(converged) {coef(fit)} else {NULL}
+      
+      bx_est <- if(converged && "bx" %in% names(coeff)) coeff["bx"] else NA
+      by_est <- if(converged && "by" %in% names(coeff)) coeff["by"] else NA
+      ax_est <- if(converged && "ax" %in% names(coeff)) coeff["ax"] else NA
+      ay_est <- if(converged && "ay" %in% names(coeff)) coeff["ay"] else NA
+      
+      # Sum RI variances across segments
+      varRIx_sum <- if(converged) {
+        ri_vars <- grep("^varRIx[0-9]+$", names(coeff), value = TRUE)
+        if(length(ri_vars) > 0) sum(coeff[ri_vars]) else NA
+      } else NA
+      
+      varRIy_sum <- if(converged) {
+        ri_vars <- grep("^varRIy[0-9]+$", names(coeff), value = TRUE)
+        if(length(ri_vars) > 0) sum(coeff[ri_vars]) else NA
+      } else NA
+      
+    } else {
+      # Model fitting failed
+      converged <- FALSE
+      post_check <- FALSE
+      fit_measures <- rep(NA, 7)
+      coeff <- NULL
+      bx_est <- NA
+      by_est <- NA
+      ax_est <- NA
+      ay_est <- NA
+      varRIx_sum <- NA
+      varRIy_sum <- NA
+    }
+    
+    # Store results
+    condition_results <- rbind(condition_results, data.frame(
+      timespan = ts,
+      timepoints_used = i,
+      n_segments = n_seg,
+      model_type = "MRI-CLPM-Free",
+      varRIx = varRIx_sum,
+      varRIy = varRIy_sum,
+      bx = bx_est,
+      by = by_est,
+      ax = ax_est,
+      ay = ay_est,
+      bias_bx = bx_est - true_bx,
+      bias_by = by_est - true_by,
+      convergence = converged,
+      post_check = post_check,
+      fit_measures = I(list(fit_measures)),
+      coefficients = I(list(coeff)),  # This saves ALL coefficients including RI covariances
+      processing_time = as.numeric(difftime(Sys.time(), start_time, 
+                                            units = "secs")),
+      stringsAsFactors = FALSE
+    ))
+    
+    # Clean up
+    if (!is.null(fit)) rm(fit)
+    gc(verbose = FALSE)
+  }
+  
+  cat("Completed timespan", ts, "\n")
+}
+
+# Add results to main data structure
+data_struct$results <- condition_results
+
+# Save results
+filename <- save_clear(data_struct, filename_prefix)
+
+cat("\n=== MRI-CLPM Free simulation completed! ===\n")
+cat("Results saved to:", filename, "\n")
+
+```
+
+### Simulation 3
+
+```{r}
+source("functionSource.R")
+
+# Generate data once with maximum timepoints
+max_timepoints <- 45
+data <- DGM(N = 20000, timepoints = max_timepoints, autocorr_effects = 0.2)
+
+cat("Generated data with", max_timepoints, "timepoints\n")
+cat("Data dimensions:", dim(data$data), "\n\n")
+
+# Initialize storage
+results <- data.frame(
+  timepoints_used = integer(),
+  model_type = character(),
+  ax = numeric(),
+  ay = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Fit models on increasing number of timepoints
+timepoints_seq <- seq(3, max_timepoints, by = 2)
+
+for (tp in timepoints_seq) {
+  cat("Fitting models with", tp, "timepoints...\n")
+  
+  # Subset data to first tp timepoints
+  cols_to_use <- c(paste0("x", 1:tp), paste0("y", 1:tp))
+  data_subset <- data$data[, cols_to_use]
+  
+  # --- Fit RI-CLPM ---
+  modelSpec_riclpm <- generate_riclpm(tp)
+  fit_riclpm <- sem(modelSpec_riclpm, data = data_subset)
+  
+  if (lavInspect(fit_riclpm, "converged")) {
+    coef_riclpm <- coef(fit_riclpm)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "RI-CLPM",
+      ax = coef_riclpm["ax"],
+      ay = coef_riclpm["ay"],
+      bx = coef_riclpm["bx"],
+      by = coef_riclpm["by"],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # --- Fit MRI-CLPM Toeplitz ---
+  modelSpec_toeplitz <- generate_segmented_riclpm(tp, timespan = 2, across_seg_cov = "toeplitz")
+  fit_toeplitz <- sem(modelSpec_toeplitz, data = data_subset)
+  
+  if (lavInspect(fit_toeplitz, "converged")) {
+    coef_toeplitz <- coef(fit_toeplitz)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "MRI-CLPM-Toeplitz",
+      ax = coef_toeplitz["ax"],
+      ay = coef_toeplitz["ay"],
+      bx = coef_toeplitz["bx"],
+      by = coef_toeplitz["by"],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # --- Fit MRI-CLPM Free ---
+  modelSpec_free <- generate_segmented_riclpm(tp, timespan = 2, across_seg_cov = "free")
+  fit_free <- sem(modelSpec_free, data = data_subset)
+  
+  if (lavInspect(fit_free, "converged")) {
+    coef_free <- coef(fit_free)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "MRI-CLPM-Free",
+      ax = coef_free["ax"],
+      ay = coef_free["ay"],
+      bx = coef_free["bx"],
+      by = coef_free["by"],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# Print results
+print(results)
+
+# Test at 30 timepoints specifically
+cat("\n=== Results at 30 timepoints ===\n")
+results_30 <- results[results$timepoints_used == 30, ]
+print(results_30)
+```
+
+## Visualisation
+
+### Sim 1
+
+```{r}
+source("functionSource.R")
+
+dataSim1 <- readRDS("RR_clpm_vs_riclpm_comparison_20251205_205030.rds")
+
+names(dataSim1$results)
+
+plot_crosslag_bias(
+  dataSim1$results, x_var = "timepoints_used", group_var = "model_type", 
+  true_bx = .1, true_by = .1, 
+  x_label = "Timepoints considered", group_label = "Model", 
+  title_suffix = "CLPM vs RI-CLPM",xlim = c(3,45),ylim = c(-.05,.05))
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+dataSim1 <- readRDS("RR_clpm_vs_riclpm_comparison_20251205_205030.rds")
+
+condition_results <- dataSim1$results
+
+# 1. Prepare data with Panel Markers
+plot_data <- condition_results %>%
+  select(timepoints_used, model_type, bias_bx, varRIx) %>%
+  pivot_longer(cols = c(bias_bx, varRIx), 
+               names_to = "metric", 
+               values_to = "value") %>%
+  filter(!(model_type == "CLPM" & metric == "varRIx")) %>%
+  mutate(metric = factor(metric, 
+                         levels = c("bias_bx", "varRIx"),
+                         labels = c("(a) Bias in Cross-Lagged Parameter", 
+                                    "(b) Random Intercept Variance")))
+
+# 2. Simplified Publication-Ready Plot
+ggplot(plot_data, aes(x = timepoints_used, y = value, group = model_type)) +
+  geom_hline(data = filter(plot_data, grepl("(a)", metric)), 
+             aes(yintercept = 0), linetype = "solid", color = "gray90") +
+  
+  geom_line(aes(linetype = model_type), size = 0.6) +
+  geom_point(aes(shape = model_type), size = 2) +
+  
+  facet_wrap(~metric, ncol = 1, scales = "free_y") +
+  
+  scale_shape_manual(values = c("CLPM" = 1, "RI-CLPM" = 16)) +
+  scale_linetype_manual(values = c("CLPM" = "dashed", "RI-CLPM" = "solid")) +
+  labs(x = "Number of Timepoints", y = NULL, 
+       shape = "Model Type:", linetype = "Model Type:") +
+  
+  # APA Theme with explicit font overrides
+  theme_classic(base_size = 12, base_family = "serif") +
+  theme(
+    # Explicitly setting family here ensures the (a) and (b) markers match
+    strip.background = element_blank(),
+    strip.text = element_text(
+      family = "serif", 
+      hjust = 0, 
+      face = "bold", 
+      size = 12
+    ), 
+    legend.position = "bottom",
+    legend.text = element_text(family = "serif"),
+    legend.title = element_text(family = "serif", face = "bold"),
+    axis.text = element_text(family = "serif", color = "black"),
+    axis.title = element_text(family = "serif")
+  )
+
+ggsave("RICLPMfigure.png", height = 6, width = 10)
+```
+
+```{r}
+dataSim1 <- readRDS("RR_clpm_vs_riclpm_comparison_20251205_205030.rds")
+data <- dataSim1$results
+
+# Filter to converged RI-CLPM models only (since CLPM doesn't have varRIx)
+riclpm_data <- data[data$model_type == "RI-CLPM" & data$convergence == TRUE, ]
+
+# Create plot with two y-axes
+plot_combined <- ggplot(data = riclpm_data, aes(x = timepoints_used)) +
+  # Primary axis: varRIx
+  geom_line(aes(y = varRIx, color = "varRIx"), linewidth = 1) +
+  geom_point(aes(y = varRIx, color = "varRIx"), size = 2) +
+  # Secondary axis: bias_bx (scaled to fit same range)
+  geom_line(aes(y = bias_bx * max(varRIx, na.rm = TRUE) / max(abs(bias_bx), na.rm = TRUE), 
+                color = "bias_bx"), linewidth = 1) +
+  geom_point(aes(y = bias_bx * max(varRIx, na.rm = TRUE) / max(abs(bias_bx), na.rm = TRUE), 
+                 color = "bias_bx"), size = 2) +
+  # Add zero line for bias (scaled)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  # Scales
+  scale_y_continuous(
+    name = "Random Intercept Variance (varRIx)",
+    sec.axis = sec_axis(~ . * max(abs(riclpm_data$bias_bx), na.rm = TRUE) / 
+                          max(riclpm_data$varRIx, na.rm = TRUE),
+                        name = "Bias in bx (Y→X)")
+  ) +
+  scale_color_manual(values = c("varRIx" = "#0072B2", "bias_bx" = "#D55E00"),
+                     labels = c("bias_bx" = "Bias in bx (Y→X)", 
+                                "varRIx" = "Random Intercept Variance (X)")) +
+  labs(title = "RI-CLPM: Random Intercept Variance and Cross-lagged Bias",
+       x = "Number of Timepoints",
+       color = "Parameter") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14),
+        legend.position = "bottom",
+        axis.title.y.left = element_text(color = "#0072B2"),
+        axis.title.y.right = element_text(color = "#D55E00"))
+
+print(plot_combined)
+```
+
+### Sim 2
+
+```{r}
+source("functionSource.R")
+
+dataSim2 <- readRDS("RR_MRICLPM_timespan_20251205_212008.rds ")
+
+names(dataSim2$results)
+
+plot_crosslag_bias(
+  dataSim2$results, x_var = "timepoints_used", group_var = "timespan", 
+  true_bx = .1, true_by = .1, 
+  x_label = "Timepoints considered", group_label = "Timespan", 
+  title_suffix = "MRI-CLPM",xlim = c(3,30),ylim = c(-.025,.025))
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+source("functionSource.R")
+
+dataSim2 <- readRDS("RR_MRICLPM_timespan_20251205_212008.rds ")
+
+# 1. Prepare data
+# Ensure timespan is a factor so ggplot treats it as discrete categories
+plot_data_ts <- dataSim2$results %>%
+  mutate(timespan_label = factor(timespan, 
+                                 levels = c(2, 4, 6),
+                                 labels = c("Timespan = 2", "Timespan = 4", "Timespan = 6")))
+
+# 2. Simplified Publication-Ready Plot
+ggplot(plot_data_ts, aes(x = timepoints_used, y = bias_bx, 
+                         group = timespan_label, 
+                         linetype = timespan_label, 
+                         shape = timespan_label)) +
+  # Reference line at 0 (No Bias)
+  geom_hline(yintercept = 0, linetype = "solid", color = "gray90") +
+  
+  # Lines and Points
+  geom_line(size = 0.6) +
+  geom_point(size = 2.5, fill = "white") +
+  ylim(c(-0.01,0.02))+
+  
+  # Labels
+  labs(title = "Bias in Cross-Lagged Parameter by Segment Timespan",
+       x = "Number of Timepoints",
+       y = "Bias",
+       linetype = "Segment Timespan:",
+       shape = "Segment Timespan:") +
+  
+  # Grayscale scaling
+  scale_linetype_manual(values = c("solid", "dashed", "dotdash")) +
+  scale_shape_manual(values = c(16, 17, 15)) + # Circle, Triangle, Square
+  
+  # APA Theme with explicit font overrides
+  theme_classic(base_size = 12, base_family = "serif") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 13, family = "serif"),
+    axis.title = element_text(face = "bold", family = "serif"),
+    axis.text = element_text(color = "black", family = "serif"),
+    legend.position = "bottom",
+    legend.text = element_text(family = "serif"),
+    legend.title = element_text(family = "serif", face = "bold"),
+    axis.line = element_line(size = 0.5)
+  ) 
+
+ggsave("timespanFigure.png", width = 10, height = 6)
+```
+
+### Sim 3
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# 1. Prepare the data: Filter for bx and calculate bias
+plot_data <- results %>%
+  mutate(bias_bx = bx - 0.1)
+
+# 2. Generate the APA-style Grayscale Plot
+plot <- ggplot(plot_data, aes(x = timepoints_used, y = bias_bx, 
+                      group = model_type, 
+                      shape = model_type, 
+                      linetype = model_type)) +
+  # Add a reference line at 0 (No Bias)
+  geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.5) +
+  # Add lines and points in grayscale
+  geom_line() +
+  geom_point(size = 3, fill = "white") + # White fill helps shapes stand out on lines
+  # Formatting scales for grayscale/shapes
+  scale_shape_manual(values = c(16, 17, 15)) + # Circle, Triangle, Square
+  scale_linetype_manual(values = c("solid", "dashed", "dotdash")) +
+  # Labeling
+  labs(title = "Bias in Cross-Lagged Parameter (X -> Y) Across Timepoints",
+       x = "Number of Timepoints",
+       y = "Bias (Estimate - 0.10)",
+       shape = "Model Type",
+       linetype = "Model Type") +
+  # APA Theming
+  theme_classic() + 
+  theme(
+    text = element_text(family = "serif", size = 12),      # Times New Roman equivalent
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+    axis.title = element_text(face = "bold"),
+    legend.position = "bottom",                            # Legend at bottom for journal space
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    axis.line = element_line(size = 0.5)
+  ) +
+  # Use exact decimals on Y axis for precision
+  scale_y_continuous(labels = function(x) sprintf("%.3f", x))
+
+ggsave("toeplitzFigure.png",width = 10, height = 6)
+```
+
+```{r}
+# Load required libraries
+if (!require("flextable")) install.packages("flextable")
+library(flextable)
+library(officer)
+
+# 1. Create the data frame
+table_data <- data.frame(
+  Simulation = c("1", "2.1", "2.2"), # 4 rows as requested
+  Aim = c("Extend findings by Bailey et al. (2024).", "Assess choice of segment timespan for the SRI-CLPM.", "Test Toeplitz constraint on latent variable covariance matrix in the SRI-CLPM"),
+  stringsAsFactors = FALSE
+)
+
+# 2. Build the APA table
+apa_table <- flextable(table_data) %>%
+  # Set font to Serif (Times New Roman equivalent)
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 12, part = "all") %>%
+  
+  # Remove all default borders
+  border_remove() %>%
+  
+  # Add APA standard horizontal lines (Top, Bottom, and Header)
+  hline_top(border = fp_border(width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 1.5), part = "body") %>%
+  
+  # Formatting
+  align(align = "left", part = "all") %>%
+  autofit() %>%
+  set_caption(caption = "Table 1. Overview of Simulation Conditions")
+
+# 3. View the table
+print(apa_table)
+
+# Optional: Export to Word (standard for academic submissions)
+ read_docx() %>%
+   body_add_flextable(apa_table) %>%
+   print(target = "simulation_table.docx")
+```

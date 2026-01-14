@@ -1,9 +1,6 @@
-####
+### Functions for illusory trait thesis 
 
-## data generating mechanism ----
-
-# variables that should actually be variable:
-# N , autocorr effects, timepoints, N of x/y related confounders
+## data generating mechanism 
 
 DGM <- function(N = 20000, 
                 autocorr_effects = 0.2, 
@@ -16,26 +13,21 @@ DGM <- function(N = 20000,
                 sigma = 0.5,
                 seed = 427) 
   {
-  
-  # Load required libraries
-  if (!require(mvtnorm)) {
-    stop("Package 'mvtnorm' is required. Please install it using: install.packages('mvtnorm')")
-  }
-  
+
   # Set seed for reproducibility
   set.seed(seed)
   
-  # Set parameters based on function inputs
+  # Rename some parameters to match the variables used by the original paper
   T <- timepoints
   c1 <- n_x_confounders
   c2 <- n_y_confounders
   alpha <- autocorr_effects
   
-  # Helper functions for matrix operations (equivalents to irow/row functions)
+  # Helper functions for matrix operations
   irow <- function(x) matrix(x, nrow = sqrt(length(x)), byrow = TRUE)
   row <- function(x) as.vector(t(x))
   
-  # Create objects for the simulation
+  # New objects for the simulation
   ## total number of variables
   v <- c1 + c2 + 2
   
@@ -58,11 +50,10 @@ DGM <- function(N = 20000,
   A[1,2] <- beta_focal
   A[2,1] <- beta_focal
   
-  ## Check the max eigenvalue (to check convergence)
+  ## Check the max eigenvalue (to check stationarity)
   max_eigenvalue <- max(eigen(A)$values)
   if (max_eigenvalue >= 1) {
-    warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4), 
-                  "- the system may not be stationary"))
+    warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),"- the system may not be stationary"))
   }
   
   ## Sigma: Var-cov matrix of time-specific residuals
@@ -74,8 +65,9 @@ DGM <- function(N = 20000,
   ## Mean1: Stationary means for first time point
   Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
   
-  # Generate data
-  ## Wide-format "bivariate" (X and Y) data df: N x 2*T
+  # Generate data ---
+  
+  # create empty dataframe
   df <- matrix(NA, nrow = N, ncol = 2*T)
   colnames(df) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
   
@@ -93,7 +85,7 @@ DGM <- function(N = 20000,
     df[, i+T] <- D[, 2]
   }
   
-  # Return results as a list
+  # Return results as a list, making sure to also save DGM parameters
   return(list(
     data = df,
     parameters = list(
@@ -117,7 +109,7 @@ DGM <- function(N = 20000,
 # Simple function to plot X and Y sequences side by side
 plot_xy_sequences <- function(data, timepoints, n_participants = 5) {
   
-  # Select random participants
+  # Sample some random participants
   N <- nrow(data)
   participants <- sample(1:N, n_participants)
   
@@ -168,6 +160,7 @@ save_clear <- function(results, filename_prefix = "sim_results"){
   timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
   filename <- paste0(filename_prefix, "_", timestamp, ".rds")
   
+  # save as RDS file
   saveRDS(results, file = filename)
   cat("Saved: ", filename, "\n")
   
@@ -176,18 +169,77 @@ save_clear <- function(results, filename_prefix = "sim_results"){
 }
 
 # -------------------------------------------------------------------------------
-# generate RI-CLPM specification
+
+# Model specifications
+
+# Generate CLPM model specification
+# only parameter is T: number of timepoints
+
+generate_clpm <- function(T){
+  
+  # Input validation
+  if (!is.numeric(T) || T <= 1 || T %% 1 != 0) {
+    stop("T must be an integer greater or equal to 2.")
+  }
+  
+  # Generate model components
+  
+  # Autoregressive and cross-lagged paths (from T2 to T)
+  if (T > 1) {
+    timepoints_reg <- 2:T
+    lagged_timepoints <- 1:(T - 1)
+    paths_x <- paste(sprintf("x%d ~ ax*x%d + by*y%d", 
+                             timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                     collapse = "\n")
+    paths_y <- paste(sprintf("y%d ~ bx*x%d + ay*y%d", 
+                             timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                     collapse = "\n")
+  } else {
+    paths_x <- ""
+    paths_y <- ""
+  }
+  
+  # Variances of observed variables at all timepoints
+  var_x <- paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse = "\n")
+  var_y <- paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse = "\n")
+  
+  # Covariances between x and y at all timepoints
+  cov_xy <- paste(sprintf("x%d ~~ x%d_y%d_cov*y%d", 1:T, 1:T, 1:T, 1:T), collapse = "\n")
+  
+  # Assemble final model string
+  
+  components <- c(
+    "# 1. Autoregressive and cross-lagged paths",
+    paths_x,
+    paths_y,
+    "\n# 2. Variances of observed variables",
+    var_x,
+    var_y,
+    "\n# 3. Covariances between x and y at each timepoint",
+    cov_xy
+  )
+  
+  # Add together, skip empty strings and add linebreaks
+  model_string <- paste(components[components != ""], collapse = "\n")
+  
+  return(model_string)
+}
+
+# ------------------------------------------------------------------------------
+
+# Generate RI-CLPM model specification
+# only parameter is T: number of timepoints
 
 generate_riclpm <- function(T) {
   
-  # 1. Input Validation
+  # Input validation
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
-    stop("T must be an integer greater or equal to 3.")
+    stop("T must be an integer greater or equal to 3.") # RI-CLPM is not identified at T < 3
   }
   
-  # 2. Generate Model Components
+  # Generate model components
   
-  # Random Intercepts (RIx and RIy)
+  # Random intercepts (RIx and RIy)
   ri_x <- sprintf("RIx =~ %s", paste(sprintf("1*x%d", 1:T), collapse = " + "))
   ri_y <- sprintf("RIy =~ %s", paste(sprintf("1*y%d", 1:T), collapse = " + "))
   
@@ -205,15 +257,15 @@ generate_riclpm <- function(T) {
   res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
   
   # Variances of within-person components (all timepoints)
-  var_wx <- paste(sprintf("wx%d ~~ res_var*wx%d", 1:T, 1:T), collapse = "\n") # Added res_var label
-  var_wy <- paste(sprintf("wy%d ~~ res_var*wy%d", 1:T, 1:T), collapse = "\n") # Added res_var label and constrained equal
+  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
+  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
   
   # Fix observed variances to zero
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
   
-  # 3. Assemble Final Model String
+  # Assemble final model string
   
   components <- c(
     "# 1. Random Intercepts", ri_x, ri_y,
@@ -242,9 +294,15 @@ generate_riclpm <- function(T) {
   return(model_string)
 }
 
+# ------------------------------------------------------------------------------
+
+# Generate MRI-CLPM model specification
+# T: total number of timepoints, timespan: timepoints on which RI's are estimated
+# across_seg_cov: has to be "equal", "zero", "free" or "toeplitz" 
+
 generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal") {
   
-  # --- 1. Input Validation ---
+  # Input validation
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
     stop("T must be an integer greater or equal to 3.")
   }
@@ -257,19 +315,21 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
     stop("timespan cannot be greater than T.")
   }
   
-  if (!across_seg_cov %in% c("equal", "zero", "free")) {
-    stop("across_seg_cov must be either 'equal', 'zero', or 'free'.")
+  if (!across_seg_cov %in% c("equal", "zero", "free", "toeplitz")) {
+    stop("across_seg_cov must be either 'equal', 'zero', 'free', or 'toeplitz'.")
   }
   
-  # --- 2. Determine Number of Segments ---
+  # Determine number of random intercepts per variable
   n_segments <- ceiling(T / timespan)
   
-  # Create a mapping of timepoints to segments
+  # Create a mapping of timepoints to timespans
   timepoint_to_segment <- rep(1:n_segments, each = timespan)[1:T]
   
-  # --- 3. Generate Random Intercepts for Each Segment ---
+  # Generate random intercepts for all timespans
+  # Structure: All RIx's first, then all RIy's
   
-  ri_definitions <- c()
+  ri_x_definitions <- c()
+  ri_y_definitions <- c()
   
   for (seg in 1:n_segments) {
     # Find which timepoints belong to this segment
@@ -283,52 +343,60 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
     ri_y_seg <- sprintf("RIy%d =~ %s", seg, 
                         paste(sprintf("1*y%d", tp_in_seg), collapse = " + "))
     
-    ri_definitions <- c(ri_definitions, ri_x_seg, ri_y_seg) # add new definitions to list
+    ri_x_definitions <- c(ri_x_definitions, ri_x_seg)
+    ri_y_definitions <- c(ri_y_definitions, ri_y_seg)
   }
   
-  # --- 4. Within-person Component Definitions ---
+  # Combine: all X's first, then all Y's
+  ri_definitions <- c(ri_x_definitions, ri_y_definitions)
+  
+  # Within-person component definitions ---
+  
   wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
   wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 5. Autoregressive and Cross-lagged Paths ---
-  if (T > 1) {
-    timepoints_reg <- 2:T
-    lagged_timepoints <- 1:(T - 1)
-    paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
-                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
-                      collapse = "\n")
-    paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
-                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
-                      collapse = "\n")
-  } else {
-    paths_wx <- ""
-    paths_wy <- ""
-  }
+  # Autoregressive and Cross-lagged paths
+  timepoints_reg <- 2:T
+  lagged_timepoints <- 1:(T - 1)
+  paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
+                            timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                    collapse = "\n")
+  paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
+                            timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                    collapse = "\n")
   
-  # --- 6. Constrained Correlated Residuals ---
-  if (T > 1) {
-    res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
-  } else {
-    res_covs <- ""
-  }
+  # Constrained Correlated Residuals
+  res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
   
-  # --- 7. Variances of Within-person Components ---
+  # Variances of within-person components
   var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
   var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 8. Fix Observed Variances to Zero ---
+  # Fix observed variances to zero
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 9. Random Intercept Variances and Covariances ---
+  # Random intercept variances and covariances
   
-  # Within-segment covariances (RIx and RIy at same timespan)
-  ri_within_seg_covs <- c()
+  # Within-segment variances and within-timespan covariances (RIx with RIy at same segment)
+  ri_variances_and_within_seg_covs <- c()
+  
+  # First: All RIx variances
   for (seg in 1:n_segments) {
-    ri_within_seg_covs <- c(ri_within_seg_covs,
-                            sprintf("RIx%d ~~ varRIx%d*RIx%d", seg, seg, seg),
-                            sprintf("RIy%d ~~ varRIy%d*RIy%d", seg, seg, seg),
-                            sprintf("RIx%d ~~ covRI%d*RIy%d", seg, seg, seg))
+    ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
+                                          sprintf("RIx%d ~~ varRIx%d*RIx%d", seg, seg, seg))
+  }
+  
+  # Second: All RIy variances
+  for (seg in 1:n_segments) {
+    ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
+                                          sprintf("RIy%d ~~ varRIy%d*RIy%d", seg, seg, seg))
+  }
+  
+  # Third: Within-segment RIx-RIy covariances (same timespan only)
+  for (seg in 1:n_segments) {
+    ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
+                                          sprintf("RIx%d ~~ covRI%d*RIy%d", seg, seg, seg))
   }
   
   # Across-segment covariances
@@ -350,11 +418,11 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
           # All RIx-RIy across-segment covariances constrained equal
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIx%d ~~ covRIxy_across*RIy%d", seg1, seg2))
-          # All RIy-RIx across-segment covariances constrained equal
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIy%d ~~ covRIyx_across*RIx%d", seg1, seg2))
         }
       }
+      
     } else if (across_seg_cov == "zero") {
       # Fixed to zero: independent confounding across segments
       across_seg_label <- "(Fixed to Zero)"
@@ -368,6 +436,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
                                   sprintf("RIy%d ~~ 0*RIx%d", seg1, seg2))
         }
       }
+      
     } else if (across_seg_cov == "free") {
       # Freely estimate all covariances with unique labels
       across_seg_label <- "(Freely Estimated)"
@@ -381,10 +450,42 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
                                   sprintf("RIy%d ~~ covRIyx_%d_%d*RIx%d", seg1, seg1, seg2, seg2))
         }
       }
+      
+    } else if (across_seg_cov == "toeplitz") {
+      # Toeplitz structure: covariances depend only on distance between segments
+      across_seg_label <- "(Toeplitz Structure)"
+      
+      # Determine maximum distance (lag)
+      max_lag <- n_segments - 1
+      
+      # For each possible distance/lag
+      for (lag in 1:max_lag) {
+        for (seg1 in 1:(n_segments - lag)) {
+          seg2 <- seg1 + lag
+          
+          # Within-variable RIx covariances: same parameter for same lag
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ covRIx_lag%d*RIx%d", seg1, lag, seg2))
+          
+          # Within-variable RIy covariances: same parameter for same lag
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIy%d ~~ covRIy_lag%d*RIy%d", seg1, lag, seg2))
+        }
+      }
+      
+      # Cross-variable covariances: only within same segment (already handled above)
+      # Across-segment cross-variable covariances fixed to zero
+      for (seg1 in 1:(n_segments - 1)) {
+        for (seg2 in (seg1 + 1):n_segments) {
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIx%d ~~ 0*RIy%d", seg1, seg2),
+                                  sprintf("RIy%d ~~ 0*RIx%d", seg1, seg2))
+        }
+      }
     }
   }
   
-  # --- 10. Fix RI Covariances with First State to Zero ---
+  # Fix RI covariances with first state to zero ---
   ri_first_state_zero <- c()
   for (seg in 1:n_segments) {
     ri_first_state_zero <- c(ri_first_state_zero,
@@ -394,11 +495,10 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
                              sprintf("wy1 ~~ 0*RIy%d", seg))
   }
   
-  # --- 11. Assemble Final Model String ---
+  # Assemble final model string
   
-  # Build components with proper separation
   components <- c(
-    "# 1. Random Intercepts (Segmented)",
+    "# 1. Random Intercepts (Segmented) - X then Y",
     paste(ri_definitions, collapse = "\n"),
     "\n# 2. Within-person components",
     wx_defs,
@@ -409,18 +509,19 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
     "\n# 4. Covariances",
     "wx1 ~~ wy1 # Covariance at T1",
     res_covs,
-    "\n# 5. Within-segment (Co)variances of Random Intercepts",
-    paste(ri_within_seg_covs, collapse = "\n"),
-    sprintf("\n# 6. Across-segment (Lateral) covariances of Random Intercepts %s", 
+    "\n# 5. (Co)variances of Random Intercepts",
+    "# 5a. Variances and within-segment covariances",
+    paste(ri_variances_and_within_seg_covs, collapse = "\n"),
+    sprintf("\n# 5b. Across-segment covariances %s", 
             ifelse(n_segments > 1, across_seg_label, "")),
     if (length(ri_across_seg_covs) > 0) paste(ri_across_seg_covs, collapse = "\n") else "# (No across-segment covariances for single segment)",
-    "\n# 7. (Residual) variances of within-person components",
+    "\n# 6. (Residual) variances of within-person components",
     var_wx,
     var_wy,
-    "\n# 8. Fix observed variances to zero",
+    "\n# 7. Fix observed variances to zero",
     zero_var_x,
     zero_var_y,
-    "\n# 9. Fix RI covariances with first state to zero",
+    "\n# 8. Fix RI covariances with first state to zero",
     paste(ri_first_state_zero, collapse = "\n")
   )
   
@@ -435,29 +536,30 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
 #                             ---- PLOTTING ----                               #
 ################################################################################
 
-# VARIANCE OF RANDOM INTERCEPT FOR X
+# Random Intercept variance plotting ---
 plot_varRIx <- function(data, x_var, group_var, x_label, group_label, plot_title, 
                         xlim = NULL, ylim = NULL) {
   
+  # ggplot call
   varRix_plot <- ggplot(data = data, 
                         aes(x = .data[[x_var]], 
                             y = varRIx, 
                             group = factor(.data[[group_var]]), 
                             color = factor(.data[[group_var]]))) +
-    geom_line(linewidth = 1) +  # Add the line layer
-    geom_point(size = 2) +     # Add points to mark the actual data points
+    geom_line(linewidth = 1) +  
+    geom_point(size = 2) +  
     
-    # --- Customize labels and titles ---
+    # labels and titles
     labs(title = plot_title,
          x = x_label,
          y = "varRIx Value",
-         color = group_label) + # This renames the legend title
+         color = group_label) + 
     
-    # --- Apply a clean theme ---
+    # theme
     theme_minimal() +
     theme(
-      plot.title = element_text(hjust = 0.5, size = 16), # Center the title
-      legend.position = "bottom" # Move legend to the bottom
+      plot.title = element_text(hjust = 0.5, size = 16), 
+      legend.position = "bottom" 
     )
   
   # Add axis limits if specified
@@ -471,7 +573,7 @@ plot_varRIx <- function(data, x_var, group_var, x_label, group_label, plot_title
   return(varRix_plot)
 }
 
-# BIAS
+# cross-lagged parameter bias plotting ---
 plot_crosslag_bias <- function(data, x_var, group_var, true_bx, true_by, 
                                x_label, group_label, title_suffix, 
                                xlim = NULL, ylim = NULL) {
@@ -552,6 +654,10 @@ plot_crosslag_bias <- function(data, x_var, group_var, true_bx, true_by,
   
   return(list(bx_plot = bias_bx_plot, by_plot = bias_by_plot))
 }
+
+# Random intercept variance plotting as a percentage of total variance ---
+
+### SHOULD BE FIXED OR DELETED - RUNNING THE DGM AGAIN IN FUNCTION IS DUMB AND REDUNDANT
 
 plot_varRIx_proportion_auto <- function(data, x_var, group_var, x_label, group_label, plot_title, 
                                         xlim = NULL, ylim = NULL, ...) {

@@ -474,19 +474,17 @@ Get model specification for the new model (update function, check identification
 ```{r}
 source("functionSource.R")
 
-data <- DGM(timepoints = 30)
+data <- DGM(timepoints = 30, autocorr_effects = .2)
 
-#fitRICLPM  <- sem(generate_riclpm(60), data$data)
-#fitZeroMRICLPM <- sem(generate_segmented_riclpm(60,5,across_seg_cov = "zero"), data$data)
-fitFreeMRICLPM <- sem(generate_segmented_riclpm(30,5,across_seg_cov = "free"),
-                      data$data)
-#fitFreeMRICLPM2 <- sem(generate_segmented_riclpm(30,3,across_seg_cov = "free"),
-#                      data$data)
-#summary(fitRICLPM)
-#summary(fitZeroMRICLPM)
-summary(fitFreeMRICLPM)
-#summary(fitFreeMRICLPM2)
-view(lavInspect(fitFreeMRICLPM, "cor.lv"))
+fitToep <- sem(generate_segmented_riclpm(30,2,"toeplitz"), data$data)
+fitFree <- sem(generate_segmented_riclpm(30,2,"free"), data$data)
+fitRICLPM <- sem(generate_riclpm(30), data$data)
+
+view(lavInspect(fitToep, "cov.lv"))
+
+summary(fitRICLPM)     # ax:.253 ay:.254 (SE .001)
+summary(fitToep)       # ax:.215 ay:.211 (SE .001-,002)
+summary(fitFreeMRICLPM)# ax:.204 ay:.208 (SE .002)
 ```
 
 Let's set up a simulation analysing the bias over time when using a normal RI-CLPM versus the new MRI-CLPM (or segmented RI-CLPM (SRI-CLPM)?). So two lines over time, with conditions set to vary the autoregressive effects (.1,.2,.3). Minimum timepoints analysed 12, increasing in steps of 4, with a timespan of RI's of 4 and a maximum of 80.
@@ -917,14 +915,6 @@ for (ts in timespan_values) {
 }
 ```
 
-#### Questions
-
-Results seem to imply freely estimating covariances between RI's is always desirable. Could we think of a reason to constrain them?
-
-Could imposing an autoregressive structure on the covariances be used to say something about the stability at the between person level (or could we even use our estimated covariances in the free model for this?)? Just looking at the covariances between RI's seems to betray some sort of autoregressive structure, which is expected with decaying stability.
-
-It seems that when using the MRI-CLPM-Free we seem to want to estimate as many RI's on as small a timespan as possible. What are the optimal and threshold values for timespan? What does estimating a RI on 1 timepoint imply? After trying some stuff, timespan of 1 is not identified, 2 seems to lead to more bias, but this should be analysed in a better simulation.
-
 #### Smaller timespans
 
 ```{r}
@@ -1102,6 +1092,16 @@ plot_bias <- plot_crosslag_bias(
 
 print(plot_bias$bx_plot)
 print(plot_bias$by_plot)
+```
+
+```{r}
+source("functionSource.r")
+data <- riclpm_vs_mriclpm_bias_20251021_172226$results
+
+names(data)
+
+plot_crosslag_bias(data, "timepoints_used", group_var = "model_type", true_bx = .1,true_by = .1, x_label = "timepoints", group_label = "model", title_suffix = "",
+xlim = c(0,100), ylim = c(-.05,.3))
 ```
 
 ### Other DGM's
