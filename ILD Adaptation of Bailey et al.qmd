@@ -1094,16 +1094,162 @@ print(plot_bias$bx_plot)
 print(plot_bias$by_plot)
 ```
 
+### New SRI-CLPM with 'cross-lagged' RI covariances
+
 ```{r}
-source("functionSource.r")
-data <- riclpm_vs_mriclpm_bias_20251021_172226$results
+source("functionSource.R")
+data <- DGM(N = 20000, timepoints = 30)$data
 
-names(data)
+fit <- sem(generate_segmented_riclpm(30, timespan = 3, across_seg_cov = "toeplitz_cross"), data)
 
-plot_crosslag_bias(data, "timepoints_used", group_var = "model_type", true_bx = .1,true_by = .1, x_label = "timepoints", group_label = "model", title_suffix = "",
-xlim = c(0,100), ylim = c(-.05,.3))
+summary(fit)
+view(lavInspect(fit, "cov.lv"))
+```
+
+```{r}
+source("functionSource.R")
+
+# Generate data once
+max_timepoints <- 42
+data <- DGM(N = 20000, timepoints = max_timepoints, autocorr_effects = 0.2)
+
+cat("CLPM, RI-CLPM, SRI-CLPM (Toeplitz), SRI-CLPM (Toeplitz+Cross)\n\n")
+
+# Initialize storage
+results <- data.frame(
+  timepoints_used = integer(),
+  model_type = character(),
+  ax = numeric(),
+  ay = numeric(),
+  bx = numeric(),
+  by = numeric(),
+  convergence = logical(),
+  stringsAsFactors = FALSE
+)
+
+# Fit models on increasing timepoints
+timepoints_seq <- seq(6, max_timepoints, by = 6)
+
+for (tp in timepoints_seq) {
+  cat("Fitting models with", tp, "timepoints...\n")
+  
+  # Subset data
+  cols_to_use <- c(paste0("x", 1:tp), paste0("y", 1:tp))
+  data_subset <- data$data[, cols_to_use]
+  
+  # --- CLPM ---
+  fit_clpm <- sem(generate_clpm(tp), data = data_subset)
+  if (lavInspect(fit_clpm, "converged")) {
+    coef_clpm <- coef(fit_clpm)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "CLPM",
+      ax = coef_clpm["ax"],
+      ay = coef_clpm["ay"],
+      bx = coef_clpm["bx"],
+      by = coef_clpm["by"],
+      convergence = TRUE,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # --- RI-CLPM ---
+  fit_riclpm <- sem(generate_riclpm(tp), data = data_subset)
+  if (lavInspect(fit_riclpm, "converged")) {
+    coef_riclpm <- coef(fit_riclpm)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "RI-CLPM",
+      ax = coef_riclpm["ax"],
+      ay = coef_riclpm["ay"],
+      bx = coef_riclpm["bx"],
+      by = coef_riclpm["by"],
+      convergence = TRUE,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # --- SRI-CLPM (Toeplitz) ---
+  fit_sri_toep <- sem(generate_segmented_riclpm(tp, timespan = 2, across_seg_cov = "toeplitz"), 
+                      data = data_subset)
+  if (lavInspect(fit_sri_toep, "converged")) {
+    coef_sri_toep <- coef(fit_sri_toep)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "SRI-CLPM-Toeplitz",
+      ax = coef_sri_toep["ax"],
+      ay = coef_sri_toep["ay"],
+      bx = coef_sri_toep["bx"],
+      by = coef_sri_toep["by"],
+      convergence = TRUE,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # --- SRI-CLPM (Toeplitz + Cross) ---
+  fit_sri_cross <- sem(generate_segmented_riclpm(tp, timespan = 2, across_seg_cov = "toeplitz_cross"), 
+                       data = data_subset)
+  if (lavInspect(fit_sri_cross, "converged")) {
+    coef_sri_cross <- coef(fit_sri_cross)
+    results <- rbind(results, data.frame(
+      timepoints_used = tp,
+      model_type = "SRI-CLPM-Toeplitz-Cross",
+      ax = coef_sri_cross["ax"],
+      ay = coef_sri_cross["ay"],
+      bx = coef_sri_cross["bx"],
+      by = coef_sri_cross["by"],
+      convergence = TRUE,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+print(results)
+
+# Simple plot
+library(ggplot2)
+
+ggplot(results, aes(x = timepoints_used, y = bx, color = model_type, group = model_type)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0.1, linetype = "dashed") +
+  labs(title = "Cross-lagged parameter bx (Y→X) across models",
+       x = "Timepoints", y = "bx estimate") +
+  ylim(0.08,0.16)+
+  theme_minimal()
+```
+
+## The Bias-Variance trade off
+
+Since our method seems to work for large sample sizes the proof of concept is there. What is needed now is to evaluate whether the method is also applicable when smaller (more realistic sample sizes) are considered. Important is to then not only look at whether a model converges or not, but also whether the standard errors are not too large.
+
+Let's first do some exploratory fitting.
+
+```{r}
+source("functionSource.R")
+
+samplesize <- 50 # <-----
+
+data <- DGM(N = samplesize, timepoints = 20)
+
+RICLPM <- sem(model = generate_riclpm(20), data = data$data)
+FSRICLPM <- sem(model = generate_segmented_riclpm(20, timespan = 2, 
+                                                  across_seg_cov = "free"),
+                data = data$data)
+TSRICLPM <- sem(model = generate_segmented_riclpm(20, timespan = 2, 
+                                                  across_seg_cov = "toeplitz_cross"),
+                data = data$data)
+
+anova(FSRICLPM, TSRICLPM, RICLPM)
+
+summary(RICLPM)
+summary(TSRICLPM)
 ```
 
 ### Other DGM's
 
 It would be worth my time to also run some simulations to look at model performance under different DGM's (e.g. a standard RI-CLPM with stable between person trait, unmeasured time-invariant confounding or a CLPM).
+
+Correlation matrix latent variables (kijken naar misfit tussen freely estimated en Toeplitz constrained)
+
+Long format (DSEM)

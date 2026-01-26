@@ -298,11 +298,11 @@ generate_riclpm <- function(T) {
 
 # Generate MRI-CLPM model specification
 # T: total number of timepoints, timespan: timepoints on which RI's are estimated
-# across_seg_cov: has to be "equal", "zero", "free" or "toeplitz" 
+# across_seg_cov: has to be "zero", "free" or "toeplitz" 
 
-generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal") {
+generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplitz") {
   
-  # Input validation
+  # --- 1. Input Validation ---
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
     stop("T must be an integer greater or equal to 3.")
   }
@@ -315,17 +315,17 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
     stop("timespan cannot be greater than T.")
   }
   
-  if (!across_seg_cov %in% c("equal", "zero", "free", "toeplitz")) {
-    stop("across_seg_cov must be either 'equal', 'zero', 'free', or 'toeplitz'.")
+  if (!across_seg_cov %in% c("zero", "free", "toeplitz")) {
+    stop("across_seg_cov must be either 'zero', 'free', or 'toeplitz'.")
   }
   
-  # Determine number of random intercepts per variable
+  # --- 2. Determine Number of Segments ---
   n_segments <- ceiling(T / timespan)
   
-  # Create a mapping of timepoints to timespans
+  # Create a mapping of timepoints to segments
   timepoint_to_segment <- rep(1:n_segments, each = timespan)[1:T]
   
-  # Generate random intercepts for all timespans
+  # --- 3. Generate Random Intercepts for Each Segment ---
   # Structure: All RIx's first, then all RIy's
   
   ri_x_definitions <- c()
@@ -350,33 +350,41 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
   # Combine: all X's first, then all Y's
   ri_definitions <- c(ri_x_definitions, ri_y_definitions)
   
-  # Within-person component definitions ---
-  
+  # --- 4. Within-person Component Definitions ---
   wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
   wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
   
-  # Autoregressive and Cross-lagged paths
-  timepoints_reg <- 2:T
-  lagged_timepoints <- 1:(T - 1)
-  paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
-                            timepoints_reg, lagged_timepoints, lagged_timepoints), 
-                    collapse = "\n")
-  paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
-                            timepoints_reg, lagged_timepoints, lagged_timepoints), 
-                    collapse = "\n")
+  # --- 5. Autoregressive and Cross-lagged Paths ---
+  if (T > 1) {
+    timepoints_reg <- 2:T
+    lagged_timepoints <- 1:(T - 1)
+    paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+    paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+  } else {
+    paths_wx <- ""
+    paths_wy <- ""
+  }
   
-  # Constrained Correlated Residuals
-  res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
+  # --- 6. Constrained Correlated Residuals ---
+  if (T > 1) {
+    res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    res_covs <- ""
+  }
   
-  # Variances of within-person components
+  # --- 7. Variances of Within-person Components ---
   var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
   var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
   
-  # Fix observed variances to zero
+  # --- 8. Fix Observed Variances to Zero ---
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
-  # Random intercept variances and covariances
+  # --- 9. Random Intercept Variances and Covariances ---
   
   # Within-segment variances and within-timespan covariances (RIx with RIy at same segment)
   ri_variances_and_within_seg_covs <- c()
@@ -404,31 +412,11 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
   across_seg_label <- ""
   
   if (n_segments > 1) {
-    if (across_seg_cov == "equal") {
-      # Constrained equal: all covariances share the same parameter
-      across_seg_label <- "(Constrained Equal)"
-      for (seg1 in 1:(n_segments - 1)) {
-        for (seg2 in (seg1 + 1):n_segments) {
-          # All within-variable RIx covariances constrained equal
-          ri_across_seg_covs <- c(ri_across_seg_covs,
-                                  sprintf("RIx%d ~~ covRIx_across*RIx%d", seg1, seg2))
-          # All within-variable RIy covariances constrained equal
-          ri_across_seg_covs <- c(ri_across_seg_covs,
-                                  sprintf("RIy%d ~~ covRIy_across*RIy%d", seg1, seg2))
-          # All RIx-RIy across-segment covariances constrained equal
-          ri_across_seg_covs <- c(ri_across_seg_covs,
-                                  sprintf("RIx%d ~~ covRIxy_across*RIy%d", seg1, seg2))
-          ri_across_seg_covs <- c(ri_across_seg_covs,
-                                  sprintf("RIy%d ~~ covRIyx_across*RIx%d", seg1, seg2))
-        }
-      }
-      
-    } else if (across_seg_cov == "zero") {
+    if (across_seg_cov == "zero") {
       # Fixed to zero: independent confounding across segments
       across_seg_label <- "(Fixed to Zero)"
       for (seg1 in 1:(n_segments - 1)) {
         for (seg2 in (seg1 + 1):n_segments) {
-          # Fix all across-segment covariances to zero
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIx%d ~~ 0*RIx%d", seg1, seg2),
                                   sprintf("RIy%d ~~ 0*RIy%d", seg1, seg2),
@@ -442,7 +430,6 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
       across_seg_label <- "(Freely Estimated)"
       for (seg1 in 1:(n_segments - 1)) {
         for (seg2 in (seg1 + 1):n_segments) {
-          # Each covariance gets a unique parameter label
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIx%d ~~ covRIx_%d_%d*RIx%d", seg1, seg1, seg2, seg2),
                                   sprintf("RIy%d ~~ covRIy_%d_%d*RIy%d", seg1, seg1, seg2, seg2),
@@ -452,40 +439,38 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
       }
       
     } else if (across_seg_cov == "toeplitz") {
-      # Toeplitz structure: covariances depend only on distance between segments
+      # Toeplitz structure with cross-lagged covariances (DEFAULT)
       across_seg_label <- "(Toeplitz Structure)"
       
-      # Determine maximum distance (lag)
       max_lag <- n_segments - 1
       
-      # For each possible distance/lag
+      # Within-variable Toeplitz
       for (lag in 1:max_lag) {
         for (seg1 in 1:(n_segments - lag)) {
           seg2 <- seg1 + lag
           
-          # Within-variable RIx covariances: same parameter for same lag
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIx%d ~~ covRIx_lag%d*RIx%d", seg1, lag, seg2))
-          
-          # Within-variable RIy covariances: same parameter for same lag
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIy%d ~~ covRIy_lag%d*RIy%d", seg1, lag, seg2))
         }
       }
       
-      # Cross-variable covariances: only within same segment (already handled above)
-      # Across-segment cross-variable covariances fixed to zero
-      for (seg1 in 1:(n_segments - 1)) {
-        for (seg2 in (seg1 + 1):n_segments) {
+      # Cross-variable Toeplitz
+      for (lag in 1:max_lag) {
+        for (seg1 in 1:(n_segments - lag)) {
+          seg2 <- seg1 + lag
+          
           ri_across_seg_covs <- c(ri_across_seg_covs,
-                                  sprintf("RIx%d ~~ 0*RIy%d", seg1, seg2),
-                                  sprintf("RIy%d ~~ 0*RIx%d", seg1, seg2))
+                                  sprintf("RIx%d ~~ covRIxy_lag%d*RIy%d", seg1, lag, seg2))
+          ri_across_seg_covs <- c(ri_across_seg_covs,
+                                  sprintf("RIy%d ~~ covRIyx_lag%d*RIx%d", seg1, lag, seg2))
         }
       }
     }
   }
   
-  # Fix RI covariances with first state to zero ---
+  # --- 10. Fix RI Covariances with First State to Zero ---
   ri_first_state_zero <- c()
   for (seg in 1:n_segments) {
     ri_first_state_zero <- c(ri_first_state_zero,
@@ -495,7 +480,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
                              sprintf("wy1 ~~ 0*RIy%d", seg))
   }
   
-  # Assemble final model string
+  # --- 11. Assemble Final Model String ---
   
   components <- c(
     "# 1. Random Intercepts (Segmented) - X then Y",
@@ -525,7 +510,6 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "equal")
     paste(ri_first_state_zero, collapse = "\n")
   )
   
-  # Remove any empty strings and collapse with newlines
   components <- components[components != ""]
   model_string <- paste(components, collapse = "\n")
   
