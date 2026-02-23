@@ -2275,7 +2275,6 @@ DGM_RICLPM <- function(N = 20000,
   colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
   
   # Add RI_x to all X columns (1 to T)
-  # Note: R recycles the vector RIs[,1] column-wise, which matches the N rows correctly
   df_final[, 1:T] <- df_final[, 1:T] + RIs[, 1]
   
   # Add RI_y to all Y columns (T+1 to 2T)
@@ -2377,4 +2376,40 @@ fit <- sem(generate_segmented_riclpm(T=30, timespan=2), data = data$data)
 
 summary(fit)
 lavInspect(fit, "cor.lv")
+```
+
+New combined DGM testing
+
+```{r}
+source("functionSource.R")
+
+# Some validation
+sim_output <- DGM(N = 100000, timepoints = 50, 
+                  autocorr_effects = 0.3,
+                  ri_var_x = 3,
+                  ri_var_y = 3,
+                  ri_cor = .5)
+
+df <- as.data.frame(sim_output$data)
+
+# Visualisation
+
+library(tidyverse)
+
+df_long <- df %>%
+  mutate(id = 1:nrow(.)) %>%
+  slice(1:5) %>% # Pick 5 people
+  pivot_longer(cols = starts_with("x"), names_to = "time", values_to = "value") %>%
+  mutate(time = as.numeric(gsub("x", "", time)))
+
+ggplot(df_long, aes(x=time, y=value, color=factor(id))) +
+  geom_line() +
+  labs(title = "Visual Check: Do individuals have different stable means?") +
+  theme_minimal()
+
+# Quick check
+
+cor_start_end_x <- cor(df$x1, df$x50)
+
+cat("Correlation between X1 and X50 NEW DGM:", round(cor_start_end_x, 3), "\n")
 ```

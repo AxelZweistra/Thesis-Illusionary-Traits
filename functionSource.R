@@ -11,9 +11,13 @@ DGM <- function(N = 20000,
                 beta_covfocal = 0.1,
                 beta_covnofocal = 0.01,
                 sigma = 0.5,
+                # --- RANDOM INTERCEPT PARAMETERS (default: no stable component) ---
+                ri_var_x = 0,    # Variance of RI for X (0 = no stable component)
+                ri_var_y = 0,    # Variance of RI for Y (0 = no stable component)
+                ri_cor = 0,      # Correlation between RI_x and RI_y
                 seed = 427) 
-  {
-
+{
+  
   # Set seed for reproducibility
   set.seed(seed)
   
@@ -53,7 +57,8 @@ DGM <- function(N = 20000,
   ## Check the max eigenvalue (to check stationarity)
   max_eigenvalue <- max(eigen(A)$values)
   if (max_eigenvalue >= 1) {
-    warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),"- the system may not be stationary"))
+    warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),
+                  "- the system may not be stationary"))
   }
   
   ## Sigma: Var-cov matrix of time-specific residuals
@@ -65,29 +70,59 @@ DGM <- function(N = 20000,
   ## Mean1: Stationary means for first time point
   Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
   
-  # Generate data ---
+  # --- Generate Time-Varying Data (CLPM process) ---
   
   # create empty dataframe
-  df <- matrix(NA, nrow = N, ncol = 2*T)
-  colnames(df) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
+  df_within <- matrix(NA, nrow = N, ncol = 2*T)
   
   ## Generate the initial values for X and Y and store them in D
   D <- rmvnorm(N, mean = Mean1, Sigma1)
   
-  ## Store the initial data from D to df
-  df[, 1] <- D[, 1]
-  df[, 1+T] <- D[, 2]
+  ## Store the initial data from D to df_within
+  df_within[, 1] <- D[, 1]
+  df_within[, 1+T] <- D[, 2]
   
-  ## Update D and df till time T
+  ## Update D and df_within till time T
   for (i in 2:T) {
     D <- D %*% t(A) + rmvnorm(N, sigma = Sigma)
-    df[, i] <- D[, 1]
-    df[, i+T] <- D[, 2]
+    df_within[, i] <- D[, 1]
+    df_within[, i+T] <- D[, 2]
+  }
+  
+  # --- Generate Random Intercepts (Time-Invariant Confounders) ---
+  
+  # Check if random intercepts should be added
+  add_ri <- (ri_var_x > 0 || ri_var_y > 0)
+  
+  if (add_ri) {
+    # Calculate covariance from correlation and variances
+    ri_cov <- ri_cor * sqrt(ri_var_x * ri_var_y)
+    ri_sigma_mat <- matrix(c(ri_var_x, ri_cov, ri_cov, ri_var_y), nrow = 2)
+    
+    # Generate N random intercepts
+    RIs <- rmvnorm(N, mean = c(0, 0), sigma = ri_sigma_mat)
+    colnames(RIs) <- c("RI_x", "RI_y")
+    
+    # Create final dataframe with RIs added
+    df_final <- df_within
+    colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
+    
+    # Add RI_x to all X columns (1 to T)
+    df_final[, 1:T] <- df_final[, 1:T] + RIs[, 1]
+    
+    # Add RI_y to all Y columns (T+1 to 2T)
+    df_final[, (T+1):(2*T)] <- df_final[, (T+1):(2*T)] + RIs[, 2]
+    
+  } else {
+    # No random intercepts - just use within-person data
+    df_final <- df_within
+    colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
+    RIs <- NULL
   }
   
   # Return results as a list
-  return(list(
-    data = df,
+  result <- list(
+    data = df_final,
     parameters = list(
       N = N,
       timepoints = T,
@@ -99,10 +134,23 @@ DGM <- function(N = 20000,
       beta_covnofocal = beta_covnofocal,
       sigma = sigma,
       StatCOVmatrix = Sigma1,
-      max_eigenvalue = max_eigenvalue
+      max_eigenvalue = max_eigenvalue,
+      ri_var_x = ri_var_x,
+      ri_var_y = ri_var_y,
+      ri_cor = ri_cor
     ),
     coefficient_matrix = A
-  ))
+  )
+  
+  # Add components if RIs were used
+  if (add_ri) {
+    result$components <- list(
+      within = df_within,
+      between = RIs
+    )
+  }
+  
+  return(result)
 }
 
 # -------------------------------------------------------------------------------

@@ -135,3 +135,20 @@ Varianties constrainen tot hetzelfde (alle RIx hebben dezelfde variantie en alle
 Random intercept varianties zijn allemaal exogeen en moeten dus worden geconstrained
 
 Within-person componenten (1ste tijdstip) zijn exogeen, volgende timepoints zijn endogeen en worden voorspeld dus residentiele varianties en covarianties.
+
+#### To do
+
+Mailtje sturen naar Ellen, verheldering variance constraints en nieuwe meeting plannen
+
+Checken of alle RIx en alle RIy constrained zijn
+
+RI's niet geconstrained
+
+```{r}
+data <- DGM(timepoints = 30)
+
+md <- sem(generate_segmented_riclpm(T = 30), data = data$data)
+
+summary(md)
+
+```
