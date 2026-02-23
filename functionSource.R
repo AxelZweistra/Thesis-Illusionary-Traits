@@ -85,7 +85,7 @@ DGM <- function(N = 20000,
     df[, i+T] <- D[, 2]
   }
   
-  # Return results as a list, making sure to also save DGM parameters
+  # Return results as a list
   return(list(
     data = df,
     parameters = list(

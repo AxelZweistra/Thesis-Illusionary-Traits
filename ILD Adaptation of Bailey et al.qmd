@@ -1237,13 +1237,927 @@ FSRICLPM <- sem(model = generate_segmented_riclpm(20, timespan = 2,
                                                   across_seg_cov = "free"),
                 data = data$data)
 TSRICLPM <- sem(model = generate_segmented_riclpm(20, timespan = 2, 
-                                                  across_seg_cov = "toeplitz_cross"),
+                                                  across_seg_cov = "toeplitz"),
                 data = data$data)
 
 anova(FSRICLPM, TSRICLPM, RICLPM)
 
 summary(RICLPM)
 summary(TSRICLPM)
+```
+
+Set up for a more complete analysis
+
+```{r}
+library(lavaan)
+library(tidyverse)
+source("functionSource.R")
+
+# --- Simulation Parameters ---
+sample_sizes <- c(50, 100, 200)
+max_timepoints <- 36
+filename_prefix <- "sriclpm_small_sample_se"
+
+# --- Initialization ---
+data_struct <- create_metadata()
+
+cat("Starting Small Sample SE Simulation\n")
+
+# --- Simulation Loop ---
+for (current_N in sample_sizes) {
+  cat("\n--- Starting Simulation for N =", current_N, "---\n")
+  
+  # 1. Generate one large dataset (max timepoints) per sample size
+  #    We subset this dataset for smaller timepoints to ensure consistency across T
+  data_gen <- DGM(N = current_N, timepoints = max_timepoints)
+  
+  # Initialize storage for this condition
+  condition_results <- data.frame(
+    sample_size = integer(),
+    timepoints_used = integer(),
+    model_type = character(),
+    timespan = integer(),
+    convergence = logical(),
+    
+    # Estimates
+    bx = numeric(), by = numeric(), ax = numeric(), ay = numeric(),
+    
+    # Standard Errors (Specific Request)
+    se_bx = numeric(), se_by = numeric(), se_ax = numeric(), se_ay = numeric(),
+    
+    # Storage
+    fit_measures = I(list()),
+    coefficients = I(list()),
+    processing_time = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # 2. Iterate through timepoints (4 to 36)
+  for (t in 4:max_timepoints) {
+    cat(sprintf("  Analyzing T = %d...\n", t))
+    
+    # Define models to estimate based on valid constraints
+    models_to_run <- list()
+    
+    # A. RI-CLPM (Always estimated)
+    models_to_run[[length(models_to_run) + 1]] <- list(
+      name = "RI-CLPM", span = NA, 
+      syntax = generate_riclpm(t)
+    )
+    
+    # B. SRI-CLPM Models (Only if T is a multiple of timespan)
+    # SRI-CLPM-2
+    if (t %% 2 == 0) {
+      models_to_run[[length(models_to_run) + 1]] <- list(
+        name = "SRI-CLPM-2", span = 2, 
+        syntax = generate_segmented_riclpm(t, timespan = 2, across_seg_cov = "toeplitz")
+      )
+    }
+    
+    # SRI-CLPM-3
+    if (t %% 3 == 0) {
+      models_to_run[[length(models_to_run) + 1]] <- list(
+        name = "SRI-CLPM-3", span = 3, 
+        syntax = generate_segmented_riclpm(t, timespan = 3, across_seg_cov = "toeplitz")
+      )
+    }
+    
+    # SRI-CLPM-4
+    if (t %% 4 == 0) {
+      models_to_run[[length(models_to_run) + 1]] <- list(
+        name = "SRI-CLPM-4", span = 4, 
+        syntax = generate_segmented_riclpm(t, timespan = 4, across_seg_cov = "toeplitz")
+      )
+    }
+    
+    # 3. Fit Loop
+    for (m in models_to_run) {
+      start_time <- Sys.time()
+      
+      fit <- try(sem(model = m$syntax, data = data_gen$data, 
+                     estimator = "MLR", optim.method = "nlminb", 
+                     control = list(eval.max = 2000, iter.max = 1000)), 
+                 silent = TRUE)
+      
+      # Default values
+      converged <- FALSE
+      fit_meas <- NULL
+      coefs <- NULL
+      est_vals <- list(bx=NA, by=NA, ax=NA, ay=NA)
+      se_vals <- list(bx=NA, by=NA, ax=NA, ay=NA)
+      
+      if (!inherits(fit, "try-error")) {
+        converged <- lavInspect(fit, "converged")
+        
+        if (converged) {
+          fit_meas <- fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+          coefs <- coef(fit)
+          pe <- parameterEstimates(fit)
+          
+          # Helper to safely extract Est and SE by label (bx, by, ax, ay)
+          for (param in c("bx", "by", "ax", "ay")) {
+            row_idx <- which(pe$label == param)
+            if (length(row_idx) > 0) {
+              est_vals[[param]] <- pe$est[row_idx[1]]
+              se_vals[[param]] <- pe$se[row_idx[1]]
+            }
+          }
+        }
+      }
+      
+      # Append results
+      condition_results <- rbind(condition_results, data.frame(
+        sample_size = current_N,
+        timepoints_used = t,
+        model_type = m$name,
+        timespan = m$span,
+        convergence = converged,
+        
+        bx = est_vals$bx, by = est_vals$by, ax = est_vals$ax, ay = est_vals$ay,
+        se_bx = se_vals$bx, se_by = se_vals$by, se_ax = se_vals$ax, se_ay = se_vals$ay,
+        
+        fit_measures = I(list(fit_meas)),
+        coefficients = I(list(coefs)),
+        processing_time = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # 4. Save results for this condition
+  data_struct$results <- rbind(data_struct$results, condition_results)
+  saved_file <- save_clear(data_struct, filename_prefix)
+  cat("  Saved progress to:", saved_file, "\n")
+}
+
+cat("\nSimulation completed successfully.\n")
+```
+
+```{r}
+library(tidyverse)
+
+# 1. Clean and Aggregate
+plot_data <- data_struct$results %>%
+  filter(convergence == TRUE) %>% # Only look at converged runs
+  group_by(sample_size, timepoints_used, model_type) %>%
+  summarise(
+    mean_bx = mean(bx, na.rm = TRUE),
+    mean_se_bx = mean(se_bx, na.rm = TRUE),
+    median_bx = median(bx, na.rm = TRUE),
+    n_conv = n(),
+    .groups = "drop"
+  ) 
+
+# 2. Calculate Ratios relative to RI-CLPM
+# We pivot wider to align SRI models with the RI-CLPM baseline
+se_ratios <- plot_data %>%
+  select(sample_size, timepoints_used, model_type, mean_se_bx) %>%
+  pivot_wider(names_from = model_type, values_from = mean_se_bx) %>%
+  mutate(
+    # Calculate Ratios (Example for SRI-CLPM-2 vs RI-CLPM)
+    Ratio_Span2 = `SRI-CLPM-2` / `RI-CLPM`,
+    Ratio_Span3 = `SRI-CLPM-3` / `RI-CLPM`,
+    Ratio_Span4 = `SRI-CLPM-4` / `RI-CLPM`
+  ) %>%
+  pivot_longer(cols = starts_with("Ratio"), names_to = "Comparison", values_to = "SE_Ratio")
+
+ggplot(se_ratios, aes(x = timepoints_used, y = SE_Ratio, color = Comparison)) +
+  geom_line(size = 1) +
+  geom_point() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") + # Baseline
+  facet_wrap(~sample_size) +
+  labs(
+    title = "Precision Cost: SE Inflation relative to RI-CLPM",
+    subtitle = "Values > 1 indicate SRI-CLPM has larger Standard Errors",
+    y = "Ratio (SRI SE / RI SE)",
+    x = "Timepoints (T)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+library(lavaan)
+library(tidyverse)
+source("functionSource.R")
+
+# Initialize storage
+results <- data.frame(
+  seed = integer(),
+  model = character(),
+  param_variance_bx = numeric(), # This stores SE^2 for bx
+  stringsAsFactors = FALSE
+)
+
+cat("Starting simulation for Parameter Variances...\n")
+
+for (i in 1:100) {
+  
+  # 1. Generate Data (Safe call)
+  data_gen <- try(DGM(N = 100, timepoints = 20, seed = i), silent = TRUE)
+  if (inherits(data_gen, "try-error")) next 
+  
+  # 2. Fit RI-CLPM
+  fit_riclpm <- try(sem(generate_riclpm(T = 20), data = data_gen$data), silent = TRUE)
+  
+  if (!inherits(fit_riclpm, "try-error")) {
+    # Extract the variance of the estimate for 'bx' (SE^2)
+    # We use vcov() which returns the covariance matrix of estimates
+    cov_mat <- try(vcov(fit_riclpm), silent = TRUE)
+    
+    if (!inherits(cov_mat, "try-error") && "bx" %in% rownames(cov_mat)) {
+      results <- rbind(results, data.frame(
+        seed = i,
+        model = "RI-CLPM",
+        param_variance_bx = cov_mat["bx", "bx"] 
+      ))
+    }
+  }
+  
+  # 3. Fit SRI-CLPM
+  fit_sriclpm <- try(sem(generate_segmented_riclpm(T = 20, timespan = 2, across_seg_cov = "toeplitz"),
+                         data = data_gen$data), silent = TRUE)
+  
+  if (!inherits(fit_sriclpm, "try-error")) {
+    cov_mat <- try(vcov(fit_sriclpm), silent = TRUE)
+    
+    if (!inherits(cov_mat, "try-error") && "bx" %in% rownames(cov_mat)) {
+      results <- rbind(results, data.frame(
+        seed = i,
+        model = "SRI-CLPM",
+        param_variance_bx = cov_mat["bx", "bx"]
+      ))
+    }
+  }
+}
+
+# --- Plotting ---
+
+# Check if we have data to plot
+if (nrow(results) > 0) {
+  ggplot(results, aes(x = param_variance_bx, fill = model)) +
+    geom_histogram(alpha = 0.6, position = "identity", bins = 30, color = "white") +
+    labs(
+      title = "Distribution of Parameter Variance for 'bx'",
+      subtitle = "Comparing uncertainty (SE^2) of the cross-lagged effect",
+      x = "Variance of Estimate (SE^2)",
+      y = "Frequency"
+    ) +
+    scale_fill_manual(values = c("RI-CLPM" = "steelblue", "SRI-CLPM" = "firebrick")) +
+    theme_minimal()
+} else {
+  cat("No models converged successfully.\n")
+}
+```
+
+Quick testing of some different DGM models and SRI-CLPM cross-lagged parameter NHST
+
+```{r}
+# load("functionSource.R")
+data <- DGM(N = 90, timepoints = 40)
+
+RICLPM <- sem(generate_riclpm(40), data = data$data)
+SRICLPM <- sem(generate_segmented_riclpm(T = 40, timespan = 2, across_seg_cov = "toeplitz"), 
+               data = data$data)
+
+# 1. Get the full parameter table for the RI-CLPM
+pe_ri <- parameterEstimates(RICLPM)
+
+# Extract estimate and SE for 'bx' (Cross-lagged Y -> X)
+bx_ri_est <- pe_ri[pe_ri$label == "bx", "est"]
+bx_ri_se  <- pe_ri[pe_ri$label == "bx", "se"]
+
+# Extract estimate and SE for 'by' (Cross-lagged X -> Y)
+by_ri_est <- pe_ri[pe_ri$label == "by", "est"]
+by_ri_se  <- pe_ri[pe_ri$label == "by", "se"]
+
+# ---
+
+# 2. Do the same for the SRI-CLPM
+pe_sri <- parameterEstimates(SRICLPM)
+
+# Extract estimate and SE for 'bx'
+bx_sri_est <- pe_sri[pe_sri$label == "bx", "est"]
+bx_sri_se  <- pe_sri[pe_sri$label == "bx", "se"]
+
+# extract estimate and SE for 'by'
+by_sri_est <- pe_sri[pe_sri$label == "by", "est"]
+by_sri_se  <- pe_sri[pe_sri$label == "by", "se"]
+
+# Check the values
+cat("\n RI-CLPM bx:", bx_ri_est[1], "(SE:", bx_ri_se[1], ")\n")
+cat("SRI-CLPM bx:", bx_sri_est[1], "(SE:", bx_sri_se[1], ")\n")
+
+cat("\n RI-CLPM bx:", by_ri_est[1], "(SE:", by_ri_se[1], ")\n")
+cat("SRI-CLPM bx:", by_sri_est[1], "(SE:", by_sri_se[1], ")\n")
+```
+
+### Analysis of the variability in variance estimates
+
+This simulation aims to study how the sample distributions of cross-lagged parameter variances change when the sample size increases. Does the gap between variance estimates of RI-CLPM and SRI-CLPM close? Are they always approximately normally distributed?
+
+```{r}
+library(lavaan)
+library(tidyverse)
+source("functionSource.R")
+
+# --- Simulation Configuration ---
+# Conditions
+sample_sizes <- c(50, 75, 100, 200)
+fixed_timepoints <- 24
+replications <- 200
+
+# Models to estimate per replication
+# List structure: Name, Function call parameters
+model_specs <- list(
+  list(name = "RI-CLPM", type = "standard", span = NA),
+  list(name = "SRI-CLPM-2", type = "segmented", span = 2),
+  list(name = "SRI-CLPM-3", type = "segmented", span = 3),
+  list(name = "SRI-CLPM-4", type = "segmented", span = 4)
+)
+
+filename_prefix <- "sim_N_effect_results"
+start_time <- Sys.time()
+
+# --- Initialize Storage ---
+# We store results in 'long' format for easier analysis later
+results <- data.frame(
+  replication = integer(),
+  sample_size = integer(),
+  model = character(),
+  timespan = integer(),
+  
+  # Outcome: Status
+  converged = logical(),
+  warning = character(),
+  error = character(),
+  
+  # Outcome: Cross-Lagged Parameters (Estimates)
+  est_bx = numeric(),
+  est_by = numeric(),
+  
+  # Outcome: Standard Errors
+  se_bx = numeric(),
+  se_by = numeric(),
+  
+  # Outcome: Significance (P-values)
+  pval_bx = numeric(),
+  pval_by = numeric(),
+  
+  stringsAsFactors = FALSE
+)
+
+cat("Starting Simulation: N-Effect (N =", paste(sample_sizes, collapse=","), ")\n")
+
+# --- Main Simulation Loop ---
+for (N in sample_sizes) {
+  cat(sprintf("\nRunning Condition: N = %d... ", N))
+  
+  for (i in 1:replications) {
+    # Progress dot every 20 reps
+    if(i %% 20 == 0) cat(".")
+    
+    # 1. Generate Data
+    # Unique seed per replication/condition combo to ensure reproducibility
+    seed_val <- i + (N * 10000)
+    
+    # Wrap in tryCatch to handle potential generation errors
+    data_gen <- tryCatch({
+      DGM(N = N, timepoints = fixed_timepoints, seed = seed_val)
+    }, error = function(e) return(NULL))
+    
+    if (is.null(data_gen)) next # Skip if data gen failed
+    
+    # 2. Estimate all 4 models on this same dataset
+    for (spec in model_specs) {
+      
+      # Generate Syntax
+      if (spec$type == "standard") {
+        syntax <- generate_riclpm(T = fixed_timepoints)
+      } else {
+        syntax <- generate_segmented_riclpm(T = fixed_timepoints, 
+                                            timespan = spec$span, 
+                                            across_seg_cov = "toeplitz")
+      }
+      
+      # Fit Model
+      fit <- try(sem(syntax, data = data_gen$data, 
+                     estimator = "MLR", 
+                     optim.method = "nlminb",
+                     control = list(eval.max = 2000, iter.max = 1000)), 
+                 silent = TRUE)
+      
+      # Initialize row data
+      row_res <- list(
+        replication = i, sample_size = N, model = spec$name, timespan = spec$span,
+        converged = FALSE, warning = NA, error = NA,
+        est_bx = NA, est_by = NA, se_bx = NA, se_by = NA, pval_bx = NA, pval_by = NA
+      )
+      
+      # Extract Results if fit was attempted
+      if (inherits(fit, "try-error")) {
+        row_res$error <- as.character(attr(fit, "condition"))
+      } else {
+        # Check Convergence
+        row_res$converged <- lavInspect(fit, "converged")
+        
+        # Check for Warnings (approximated by checking if SEs are finite if converged)
+        # Note: accurate warning capture requires calling lavaan differently, 
+        # but we can usually deduce issues from results.
+        
+        if (row_res$converged) {
+          # Get Parameter Table
+          pe <- parameterEstimates(fit)
+          
+          # Extract bx (Y -> X)
+          bx_row <- pe[pe$label == "bx", ]
+          if (nrow(bx_row) > 0) {
+            row_res$est_bx <- bx_row$est
+            row_res$se_bx  <- bx_row$se
+            row_res$pval_bx <- bx_row$pvalue
+          }
+          
+          # Extract by (X -> Y)
+          by_row <- pe[pe$label == "by", ]
+          if (nrow(by_row) > 0) {
+            row_res$est_by <- by_row$est
+            row_res$se_by  <- by_row$se
+            row_res$pval_by <- by_row$pvalue
+          }
+        }
+      }
+      
+      # Append to main results
+      results <- bind_rows(results, as.data.frame(row_res))
+    }
+  }
+}
+
+# --- Save Final Results ---
+saveRDS(results, paste0(filename_prefix, ".rds"))
+
+total_time <- Sys.time() - start_time
+cat("\n\nSimulation Finished in:", round(total_time, 2), units(total_time), "\n")
+cat("Results saved to", paste0(filename_prefix, ".rds"), "\n")
+
+# --- Quick Diagnostic Check ---
+cat("\nConvergence Rates by Condition:\n")
+print(table(results$sample_size, results$model, results$converged))
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(gridExtra) # For arranging plots
+
+results <- sim_N_effect_results
+
+# 1. Prepare Data
+# Filter only converged models to ensure valid comparisons
+plot_data <- results %>%
+  filter(converged == TRUE) %>%
+  mutate(
+    # Create a clean factor for Sample Size for better labeling
+    N_Label = factor(paste0("N = ", sample_size), 
+                     levels = paste0("N = ", sort(unique(sample_size)))),
+    # Ensure Model is a factor in the desired order
+    model = factor(model, levels = c("RI-CLPM", "SRI-CLPM-2", "SRI-CLPM-3", "SRI-CLPM-4"))
+  )
+
+# Define True Parameter Value (adjust if your DGM used a different value, e.g., 0.1)
+true_beta <- 0.1 
+
+# --- Plot A: Distribution of Estimates (Bias & Variance) ---
+p1 <- ggplot(plot_data, aes(x = model, y = est_bx, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+  geom_hline(yintercept = true_beta, linetype = "dashed", color = "red", size = 0.8) +
+  facet_wrap(~N_Label, nrow = 1) +
+  scale_fill_brewer(palette = "Blues") +
+  labs(
+    title = "1. Empirical Distribution of Cross-Lagged Estimates (bx)",
+    y = "Parameter Estimate",
+    x = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "bottom"       
+  )
+
+# --- Plot B: Distribution of Standard Errors (Precision) ---
+p2 <- ggplot(plot_data, aes(x = model, y = se_bx, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+  facet_wrap(~N_Label, nrow = 1) +
+  scale_fill_brewer(palette = "Greens") +
+  labs(
+    title = "2. Distribution of Estimated Standard Errors",
+    y = "Standard Error (SE)",
+    x = "Model Specification"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "bottom"
+  )
+
+p1
+p2
+
+library(dplyr)
+library(knitr)
+
+# Create table of significant cross-lagged effects (p < .05)
+significance_table <- results %>%
+  filter(converged == TRUE) %>% # Only consider converged models
+  group_by(sample_size, model) %>%
+  summarise(
+    # Calculate percentage of significant p-values for bx and by
+    sig_bx_pct = mean(pval_bx < 0.05, na.rm = TRUE) * 100,
+    sig_by_pct = mean(pval_by < 0.05, na.rm = TRUE) * 100,
+    n_converged = n(), # Optional: Track how many models are included
+    .groups = "drop"
+  )
+
+# Print the formatted table
+kable(significance_table, 
+      digits = 1,
+      col.names = c("Sample Size", "Model", "Sig. bx (%)", "Sig. by (%)", "Converged N"),
+      caption = "Percentage of Significant Cross-Lagged Parameters (Alpha = .05)")
+
+library(dplyr)
+
+se_bias_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  group_by(sample_size, model) %>%
+  summarise(
+    Empirical_SE = sd(est_bx, na.rm = TRUE), # sd of the cross-lagged parameter
+    Mean_Estimated_SE = mean(se_bx, na.rm = TRUE), # mean of estimated SE's
+    Bias_Percent = ((Mean_Estimated_SE - Empirical_SE) / Empirical_SE) * 100,
+    
+    .groups = "drop"
+  )
+
+view(se_bias_analysis)
+
+library(knitr)
+
+true_value <- 0.1 
+
+coverage_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  mutate(
+    # 1. Calculate 95% Confidence Intervals
+    ci_lower = est_bx - (1.96 * se_bx),
+    ci_upper = est_bx + (1.96 * se_bx),
+    
+    # 2. Check if True Value falls inside the Interval
+    covered = (true_value >= ci_lower) & (true_value <= ci_upper)
+  ) %>%
+  
+  # 3. Summarize by Condition
+  group_by(sample_size, model) %>%
+  summarise(
+    coverage_rate = mean(covered, na.rm = TRUE) * 100,
+    n_valid = n(),
+    .groups = "drop"
+  )
+
+# Display the Table
+kable(coverage_analysis, 
+      digits = 1,
+      col.names = c("Sample Size", "Model", "Coverage Rate (%)", "Valid Replications"),
+      caption = "Coverage Rates: % of 95% CIs containing the True Value (0.1)")
+```
+
+#### To check the RMSEA, error messages and a different T value
+
+We slightly change the above simulation so it fits our needs all in one. Let's start with T = 12.
+
+```{r}
+library(lavaan)
+library(tidyverse)
+library(mvtnorm)
+source("functionSource.R")
+
+# --- 1. Simulation Configuration ---
+sample_sizes <- c(50, 75, 100, 200)
+fixed_timepoints <- 12 
+replications <- 200
+
+model_specs <- list(
+  list(name = "RI-CLPM", type = "standard", span = NA),
+  list(name = "SRI-CLPM-2", type = "segmented", span = 2),
+  list(name = "SRI-CLPM-3", type = "segmented", span = 3),
+  list(name = "SRI-CLPM-4", type = "segmented", span = 4) 
+)
+
+filename_prefix <- "sim_T12_warnings_log"
+
+# --- 2. Helper: Smart Fitting Function ---
+safe_fit <- function(syntax, data) {
+  warn_msgs <- character()
+  err_msg <- NA_character_
+  fit_obj <- NULL
+  
+  tryCatch({
+    withCallingHandlers({
+      fit_obj <- sem(syntax, data = data, 
+                     estimator = "MLR", 
+                     optim.method = "nlminb",
+                     control = list(eval.max = 2500, iter.max = 1500))
+    }, warning = function(w) {
+      warn_msgs <<- c(warn_msgs, w$message)
+      invokeRestart("muffleWarning")
+    })
+  }, error = function(e) {
+    err_msg <<- e$message
+  })
+  
+  return(list(fit = fit_obj, warnings = unique(warn_msgs), error = err_msg))
+}
+
+# --- 3. Initialize Storage ---
+results <- data.frame(
+  replication = integer(),
+  sample_size = integer(),
+  model = character(),
+  converged = logical(),
+  error_msg = character(),
+  warning_msgs = character(),
+  warning_count = integer(),
+  rmsea = numeric(),
+  est_bx = numeric(), se_bx = numeric(), pval_bx = numeric(),
+  est_by = numeric(), se_by = numeric(), pval_by = numeric(),
+  stringsAsFactors = FALSE
+)
+
+cat("Starting Simulation for T = 12 with Warning Logging...\n")
+
+# --- 4. Main Loop ---
+for (N in sample_sizes) {
+  cat(sprintf("\nProcessing N = %d... ", N))
+  
+  for (i in 1:replications) {
+    if(i %% 20 == 0) cat(".")
+    
+    seed_val <- i + (N * 10000)
+    dgm_out <- tryCatch(DGM(N = N, timepoints = fixed_timepoints, seed = seed_val), 
+                        error = function(e) NULL)
+    
+    if(is.null(dgm_out)) next
+    
+    for (spec in model_specs) {
+      if (spec$type == "standard") {
+        syn <- generate_riclpm(T = fixed_timepoints)
+      } else {
+        syn <- generate_segmented_riclpm(T = fixed_timepoints, 
+                                         timespan = spec$span, 
+                                         across_seg_cov = "toeplitz")
+      }
+      
+      fit_res <- safe_fit(syn, dgm_out$data)
+      
+      row_data <- list(
+        replication = i, sample_size = N, model = spec$name,
+        converged = FALSE, error_msg = NA, warning_msgs = NA, warning_count = 0,
+        rmsea = NA,
+        est_bx = NA, se_bx = NA, pval_bx = NA,
+        est_by = NA, se_by = NA, pval_by = NA
+      )
+      
+      if (!is.na(fit_res$error)) {
+        row_data$error_msg <- fit_res$error
+      } else {
+        if (length(fit_res$warnings) > 0) {
+          row_data$warning_count <- length(fit_res$warnings)
+          row_data$warning_msgs <- paste(fit_res$warnings, collapse = " | ")
+        }
+        
+        if (!is.null(fit_res$fit)) {
+           row_data$converged <- lavInspect(fit_res$fit, "converged")
+        }
+        
+        if (row_data$converged) {
+          # FIX 1: Wrap fitMeasures in as.numeric()
+          row_data$rmsea <- as.numeric(fitMeasures(fit_res$fit, "rmsea"))
+          
+          pe <- parameterEstimates(fit_res$fit)
+          
+          bx_p <- pe[pe$label == "bx", ]
+          if(nrow(bx_p) > 0) {
+             # FIX 2: Wrap extractions in as.numeric()
+             row_data$est_bx <- as.numeric(bx_p$est[1])
+             row_data$se_bx <- as.numeric(bx_p$se[1])
+             row_data$pval_bx <- as.numeric(bx_p$pvalue[1])
+          }
+          
+          by_p <- pe[pe$label == "by", ]
+          if(nrow(by_p) > 0) {
+            row_data$est_by <- as.numeric(by_p$est[1])
+            row_data$se_by <- as.numeric(by_p$se[1])
+            row_data$pval_by <- as.numeric(by_p$pvalue[1])
+          }
+        }
+      }
+      results <- bind_rows(results, as.data.frame(row_data))
+    }
+  }
+}
+
+saveRDS(results, paste0(filename_prefix, ".rds"))
+cat("\n\nSimulation Finished. Results saved.\n")
+
+# --- Analysis Output ---
+cat("\n--- Warning Analysis (Top 10) ---\n")
+warning_summary <- results %>%
+  filter(!is.na(warning_msgs)) %>%
+  separate_rows(warning_msgs, sep = " \\| ") %>%
+  group_by(sample_size, model, warning_msgs) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  arrange(sample_size, model, desc(count))
+
+warning_summary$short_warning <- substr(warning_summary$warning_msgs, 1, 60)
+print(head(warning_summary, 10))
+
+cat("\n--- RMSEA Summary ---\n")
+RMSEA_summary <- results %>%
+  filter(converged == TRUE) %>%
+  group_by(sample_size, model) %>%
+  summarise(
+    Mean_RMSEA = mean(rmsea, na.rm=TRUE),
+    RMSEA_05_Rate = mean(rmsea < 0.05, na.rm=TRUE) * 100,
+    .groups = "drop"
+  )
+print(RMSEA_summary)
+```
+
+#### Analysis of T 12
+
+```{r}
+source("functionSource.R")
+library(ggplot2)
+library(dplyr)
+
+results <- sim_T12_warnings_log
+
+# 1. Prepare Data
+# Filter only converged models to ensure valid comparisons
+plot_data <- results %>%
+  filter(converged == TRUE) %>%
+  mutate(
+    # Create a clean factor for Sample Size for better labeling
+    N_Label = factor(paste0("N = ", sample_size), 
+                     levels = paste0("N = ", sort(unique(sample_size)))),
+    # Ensure Model is a factor in the desired order
+    model = factor(model, levels = c("RI-CLPM", "SRI-CLPM-2", "SRI-CLPM-3", "SRI-CLPM-4"))
+  )
+
+# Define True Parameter Value (adjust if your DGM used a different value, e.g., 0.1)
+true_beta <- 0.1 
+
+# --- Plot A: Distribution of Estimates (Bias & Variance) ---
+p1 <- ggplot(plot_data, aes(x = model, y = est_bx, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+  geom_hline(yintercept = true_beta, linetype = "dashed", color = "red", size = 0.8) +
+  facet_wrap(~N_Label, nrow = 1) +
+  scale_fill_brewer(palette = "Blues") +
+  labs(
+    title = "1. Empirical Distribution of Cross-Lagged Estimates (bx)",
+    y = "Parameter Estimate",
+    x = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "bottom"       
+  )
+
+# --- Plot B: Distribution of Standard Errors (Precision) ---
+p2 <- ggplot(plot_data, aes(x = model, y = se_bx, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+  facet_wrap(~N_Label, nrow = 1) +
+  scale_fill_brewer(palette = "Greens") +
+  labs(
+    title = "2. Distribution of Estimated Standard Errors",
+    y = "Standard Error (SE)",
+    x = "Model Specification"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "bottom"
+  )
+
+p1
+p2
+
+library(dplyr)
+library(knitr)
+
+# Create table of significant cross-lagged effects (p < .05)
+significance_table <- results %>%
+  filter(converged == TRUE) %>% # Only consider converged models
+  group_by(sample_size, model) %>%
+  summarise(
+    # Calculate percentage of significant p-values for bx and by
+    sig_bx_pct = mean(pval_bx < 0.05, na.rm = TRUE) * 100,
+    sig_by_pct = mean(pval_by < 0.05, na.rm = TRUE) * 100,
+    n_converged = n(), 
+    .groups = "drop"
+  )
+
+# Print the formatted table
+kable(significance_table, 
+      digits = 1,
+      col.names = c("Sample Size", "Model", "Sig. bx (%)", "Sig. by (%)", "Converged N"),
+      caption = "Percentage of Significant Cross-Lagged Parameters (Alpha = .05)")
+
+library(dplyr)
+
+se_bias_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  group_by(sample_size, model) %>%
+  summarise(
+    Empirical_SE = sd(est_bx, na.rm = TRUE), # sd of the cross-lagged parameter
+    Mean_Estimated_SE = mean(se_bx, na.rm = TRUE), # mean of estimated SE's
+    Bias_Percent = ((Mean_Estimated_SE - Empirical_SE) / Empirical_SE) * 100,
+    
+    .groups = "drop"
+  )
+
+view(se_bias_analysis)
+
+library(knitr)
+
+true_value <- 0.1 
+
+coverage_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  mutate(
+    # 1. Calculate 95% Confidence Intervals
+    ci_lower = est_bx - (1.96 * se_bx),
+    ci_upper = est_bx + (1.96 * se_bx),
+    
+    # 2. Check if True Value falls inside the Interval
+    covered = (true_value >= ci_lower) & (true_value <= ci_upper)
+  ) %>%
+  
+  # 3. Summarize by Condition
+  group_by(sample_size, model) %>%
+  summarise(
+    coverage_rate = mean(covered, na.rm = TRUE) * 100,
+    n_valid = n(),
+    .groups = "drop"
+  )
+
+# Display the Table
+kable(coverage_analysis, 
+      digits = 1,
+      col.names = c("Sample Size", "Model", "Coverage Rate (%)", "Valid Replications"),
+      caption = "Coverage Rates: % of 95% CIs containing the True Value (0.1)")
+```
+
+#### Corr. Matrix misfit
+
+```{r}
+source("functionSource.R")
+data <- DGM(timepoints = 30, N = 40000)
+
+fitSRI_free <- sem(generate_segmented_riclpm
+                   (T = 30, timespan = 3, across_seg_cov = "free"), 
+                   data = data$data)
+fitSRI_toep <- sem(generate_segmented_riclpm
+                   (T = 30, timespan = 3, across_seg_cov = "toeplitz"), 
+                   data = data$data)
+
+freeCorMat <- lavInspect(fitSRI_free, "cor.lv")
+toepCorMat <- lavInspect(fitSRI_toep, "cor.lv")
+
+diffMatrix <- freeCorMat - toepCorMat
+
+heatmap <- diffMatrix[1:20, 1:20] %>% 
+  as.table() %>%
+  as.data.frame() %>%
+  ggplot(mapping = aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_tile() +
+  # Adjust size and set color based on intensity for readability
+  geom_text(aes(label = sprintf("%.2f", Freq), 
+                color = abs(Freq) > 0.05), # Logical check for high contrast
+            size = 3) + 
+  # Use scale_color_manual to switch between black and white text
+  scale_color_manual(values = c("black", "white"), guide = "none") +
+  scale_fill_gradient2(low = "blue", 
+                       high = "red", 
+                       mid = "white", 
+                       midpoint = 0,
+                       name = "Difference") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(title = "Latent Correlation Difference: Free vs. Toeplitz",
+       subtitle = "Calculated as (Free Matrix - Toeplitz Matrix)",
+       x = "Latent Variable",
+       y = "Latent Variable")
+
+print(heatmap)
 ```
 
 ### Other DGM's
@@ -1253,3 +2167,214 @@ It would be worth my time to also run some simulations to look at model performa
 Correlation matrix latent variables (kijken naar misfit tussen freely estimated en Toeplitz constrained)
 
 Long format (DSEM)
+
+Attempt at new DGM according to a RI-CLPM
+
+```{r}
+library(mvtnorm)
+
+DGM_RICLPM <- function(N = 20000, 
+                autocorr_effects = 0.2, 
+                timepoints = 100, 
+                n_x_confounders = 5, 
+                n_y_confounders = 5,
+                beta_focal = 0.1,
+                beta_covfocal = 0.1,
+                beta_covnofocal = 0.01,
+                sigma = 0.5,
+                # --- NEW PARAMETERS FOR RANDOM INTERCEPTS ---
+                ri_var_x = 1.0,  # Variance of RI for X
+                ri_var_y = 1.0,  # Variance of RI for Y
+                ri_cor = 0.3,    # Correlation between RI_x and RI_y
+                seed = 427) 
+  {
+
+  # Set seed for reproducibility
+  set.seed(seed)
+  
+  T <- timepoints
+  c1 <- n_x_confounders
+  c2 <- n_y_confounders
+  alpha <- autocorr_effects
+  
+  # Helper functions for matrix operations
+  irow <- function(x) matrix(x, nrow = sqrt(length(x)), byrow = TRUE)
+  row <- function(x) as.vector(t(x))
+  
+  # New objects for the simulation
+  ## total number of variables
+  v <- c1 + c2 + 2
+  
+  ## A: Matrix of path coefficients
+  A <- matrix(NA, v, v)
+  diag(A) <- alpha
+  A[lower.tri(A, diag = FALSE)] <- beta_covnofocal 
+  A[upper.tri(A, diag = FALSE)] <- beta_covnofocal
+  
+  c1t <- 3:(2+c1)
+  c2t <- (3+c1):v
+  A[c1t, 1] <- beta_covfocal
+  A[1, c1t] <- beta_covfocal
+  A[c2t, 2] <- beta_covfocal
+  A[2, c2t] <- beta_covfocal
+  A[c1t, c1t][lower.tri(A[c1t, c1t], diag = FALSE)] <- beta_covfocal
+  A[c1t, c1t][upper.tri(A[c1t, c1t], diag = FALSE)] <- beta_covfocal
+  A[c2t, c2t][lower.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
+  A[c2t, c2t][upper.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
+  A[1,2] <- beta_focal
+  A[2,1] <- beta_focal
+  
+  ## Check the max eigenvalue (to check stationarity)
+  max_eigenvalue <- max(eigen(A)$values)
+  if (max_eigenvalue >= 1) {
+    warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),"- the system may not be stationary"))
+  }
+  
+  ## Sigma: Var-cov matrix of time-specific residuals
+  Sigma <- diag(rep(sigma, v))
+  
+  ## Sigma1: Stationary Var-cov matrix for the first time point
+  Sigma1 <- irow(solve(diag(dim(A)[1]^2) - t(A) %x% t(A)) %*% row(Sigma))
+  
+  ## Mean1: Stationary means for first time point
+  Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
+  
+  # --- Generate Time-Varying Data (CLPM process) ---
+  
+  # create empty dataframe
+  df_within <- matrix(NA, nrow = N, ncol = 2*T)
+  
+  ## Generate the initial values for X and Y and store them in D
+  D <- rmvnorm(N, mean = Mean1, Sigma1)
+  
+  ## Store the initial data from D to df_within
+  df_within[, 1] <- D[, 1]
+  df_within[, 1+T] <- D[, 2]
+  
+  ## Update D and df_within till time T
+  for (i in 2:T) {
+    D <- D %*% t(A) + rmvnorm(N, sigma = Sigma)
+    df_within[, i] <- D[, 1]
+    df_within[, i+T] <- D[, 2]
+  }
+  
+  # --- Generate Random Intercepts (Time-Invariant Confounders) ---
+  
+  # Calculate covariance from correlation and variances
+  ri_cov <- ri_cor * sqrt(ri_var_x * ri_var_y)
+  ri_sigma_mat <- matrix(c(ri_var_x, ri_cov, ri_cov, ri_var_y), nrow = 2)
+  
+  # Generate N random intercepts
+  RIs <- rmvnorm(N, mean = c(0, 0), sigma = ri_sigma_mat)
+  colnames(RIs) <- c("RI_x", "RI_y")
+  
+  # --- Combine Within-Person and Between-Person Components ---
+  
+  # Create final dataframe
+  df_final <- df_within
+  colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
+  
+  # Add RI_x to all X columns (1 to T)
+  # Note: R recycles the vector RIs[,1] column-wise, which matches the N rows correctly
+  df_final[, 1:T] <- df_final[, 1:T] + RIs[, 1]
+  
+  # Add RI_y to all Y columns (T+1 to 2T)
+  df_final[, (T+1):(2*T)] <- df_final[, (T+1):(2*T)] + RIs[, 2]
+  
+  # Return results as a list
+  return(list(
+    data = df_final,
+    components = list(
+      within = df_within,
+      between = RIs
+    ),
+    parameters = list(
+      N = N,
+      timepoints = T,
+      n_x_confounders = c1,
+      n_y_confounders = c2,
+      autocorr_effects = alpha,
+      beta_focal = beta_focal,
+      beta_covfocal = beta_covfocal,
+      beta_covnofocal = beta_covnofocal,
+      sigma = sigma,
+      StatCOVmatrix = Sigma1,
+      max_eigenvalue = max_eigenvalue,
+      # New parameters
+      ri_var_x = ri_var_x,
+      ri_var_y = ri_var_y,
+      ri_cor = ri_cor
+    ),
+    coefficient_matrix = A
+  ))
+}
+
+# Some validation
+
+sim_output <- DGM_RICLPM(N = 100000, timepoints = 50, 
+                  autocorr_effects = 0.3, 
+                  ri_var_x = 4.5, 
+                  ri_var_y = 4.5, 
+                  ri_cor = 0.5)
+
+df <- as.data.frame(sim_output$data)
+
+# Visualisation
+
+library(tidyverse)
+
+df_long <- df %>%
+  mutate(id = 1:nrow(.)) %>%
+  slice(1:5) %>% # Pick 5 people
+  pivot_longer(cols = starts_with("x"), names_to = "time", values_to = "value") %>%
+  mutate(time = as.numeric(gsub("x", "", time)))
+
+ggplot(df_long, aes(x=time, y=value, color=factor(id))) +
+  geom_line() +
+  labs(title = "Visual Check: Do individuals have different stable means?") +
+  theme_minimal()
+
+# Quick check
+
+cor_start_end_x <- cor(df$x1, df$x50)
+
+cat("Correlation between X1 and X50 NEW DGM:", round(cor_start_end_x, 3), "\n")
+
+sim_output <- DGM(N = 100000, timepoints = 50, 
+                  autocorr_effects = 0.3)
+
+df <- as.data.frame(sim_output$data)
+
+cor_start_end_x <- cor(df$x1, df$x50)
+
+cat("Correlation between X1 and X50 OLD DGM:", round(cor_start_end_x, 3), "\n")
+```
+
+Belangrijk om nog te checken, bij lagere RI variances lijkt het model nog wat burn-in nodig te hebben? Uit een snelle brainstorm met Gemini is dit wellicht te wijten aan instabiele analytische schatting van de stationaire covariantie matrix Sigma1? Optie om een kleine burn-in in te bouwen.
+
+#### Initial check
+
+Some initial testing of SRI-CLPM performance on this new DGM.
+
+```{r}
+data <- DGM_RICLPM(N = 20000, timepoints = 30)
+
+# RI variances set to 1 by default
+
+fitRICLPM <- sem(generate_riclpm(30), data = data$data)
+fitSRICLPM <- sem(generate_segmented_riclpm(30), data = data$data)
+
+summary(fitRICLPM)
+summary(fitSRICLPM)
+```
+
+Random intercept variances in the RI-CLPM are around 1.025, which seems to correspond to the actual RI variance of 1 + some extra detected from the time-varying component. At first glance the SRI-CLPM seems to still be able to protect against the influence of confounding, although it seems possible the cross-lagged parameters might be slightly underestimated. A full simulation should clarify this.
+
+```{r}
+data <- DGM(N = 60, timepoints = 30)
+
+fit <- sem(generate_segmented_riclpm(T=30, timespan=2), data = data$data)
+
+summary(fit)
+lavInspect(fit, "cor.lv")
+```

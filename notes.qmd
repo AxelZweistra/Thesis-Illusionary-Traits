@@ -1,0 +1,137 @@
+---
+title: "Thoughts and small scraps"
+format: html
+editor: visual
+---
+
+### SRI-CLPM in terms of the bias variance tradeoff
+
+Initial good news is that the SRI-CLPM seems to converge well, even on small samples. I need to test this further, under differing DGM's. Unclear however, is how well the unbiased estimation works under realistic samples.
+
+After some initial small tests, it seems that the unbiased estimation works relatively well, but an important point might be timespan length. In our unrealistic large "population" samples the minimal timespan of 2 worked best. However, at first glance it seems that this might not hold for smaller samples. Here increasing timespan somewhat seems to lead to better estimates, and less inflated SE's.
+
+> A larger analysis of the model behaviour under sparse datasets is needed. It should vary some combinations of two conditions: N (sample size) and T (segment timespan). In addition, the NHST aspect of it should be checked by saving the omnibus p-value.
+
+Questions, known unknowns
+
+-   Is there a "true" standard error I can derive from the DGM? As in, square root of some variance or error I specified somewhere? Should I just compare it to the one estimated in the RICLPM?
+
+-   Can we find some sort of "rule of thumb" for segment timespan, given that estimating smaller timespans on smaller sample sizes seems to increase bias and variance? e.g. at least 20 participants per segment (although this would of course also depend on other variables).
+
+-   Can we do some sort of "empirical power analysis" to test whether the SRI-CLPM is closer to the nominal alpha level compared to the RICLPM?
+
+### Meeting Feb
+
+Convergentie lijkt prima te werken, moet nog wel worden geverifieerd onder andere DGM parameters.
+
+![](images/clipboard-660710950.png)
+
+![](images/clipboard-169421946.png)
+
+Coverage rate
+
+```{r}
+kable(coverage_analysis, 
+      digits = 1,
+      col.names = 
+        c("Sample Size", "Model", "Coverage Rate (%)", "Valid Replications"),
+      caption = 
+        "Coverage Rates: % of 95% CIs containing the True Value (0.1)")
+```
+
+RMSE(A)
+
+Foutmeldingen loggen en analyseren
+
+Long format in Mplus 9 (of alleen fixed effects in Stan)
+
+Andere DGM's
+
+Andere T (kleiner, 12, 18 etc.)
+
+### Meeting 11 Feb
+
+#### Andere T (12)
+
+![](images/clipboard-4273453000.png)
+
+![](images/clipboard-2402818251.png)
+
+De vorm / trends zijn precies hetzelfde als met meer timepoints, alleen dan met grotere estimated standaardfouten.
+
+#### Coverage rates
+
+```{r}
+results <- sim_T12_warnings_log
+
+coverage_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  mutate(
+    # 1. Calculate 95% Confidence Intervals
+    ci_lower = est_bx - (1.96 * se_bx),
+    ci_upper = est_bx + (1.96 * se_bx),
+    
+    # 2. Check if True Value falls inside the Interval
+    covered = (true_value >= ci_lower) & (true_value <= ci_upper)
+  ) %>%
+  
+  # 3. Summarize by Condition
+  group_by(sample_size, model) %>%
+  summarise(
+    coverage_rate = mean(covered, na.rm = TRUE) * 100,
+    n_valid = n(),
+    .groups = "drop"
+  )
+```
+
+#### SE bias
+
+```{r}
+results <- sim_T12_warnings_log
+
+se_bias_analysis <- results %>%
+  filter(converged == TRUE) %>%
+  group_by(sample_size, model) %>%
+  summarise(
+    Empirical_SE = sd(est_bx, na.rm = TRUE), # sd of the cross-lagged parameter
+    Mean_Estimated_SE = mean(se_bx, na.rm = TRUE), # mean of estimated SE's
+    Bias_Percent = ((Mean_Estimated_SE - Empirical_SE) / Empirical_SE) * 100,
+    
+    .groups = "drop"
+  )
+view(se_bias_analysis)
+```
+
+#### Warnings
+
+```{r}
+view(warning_summary)
+```
+
+#### Verschil Corr. Matrices
+
+Correlatie matrices kunnen eenvoudig worden gekregen via de lav.Inspect functie. Data is gegenereerd voor 30 timepoints, met N = 40,000. Timespan voor zowel Free als Toeplitz modellen was 3. Een heatmap van de verschil-matrix voor de relaties tussen de random intercepts is als volgt.
+
+```{r}
+heatmap
+```
+
+Ik kan bijna geen patroon herkennen, en de verschillen zijn erg klein. De Toeplitz-constraints lijken dus voor dit data genererend mechanisme goed te werken.
+
+#### Nieuw DGM
+
+Ik heb een nieuwe variant gemaakt op de DGM functie, die een time-invariant confounder (random intercept) toevoegt. Na wat kleine testjes lijkt hij te werken, ik heb alleen gezien dat het er soms op lijkt dat het proces initieel nog niet helemaal stationair is. Een kleine burn-in periode is dus wellicht handig.
+
+![](images/clipboard-1120765683.png)
+
+![](images/clipboard-4206583940.png)
+
+#### Meeting notes
+
+T = 12 met meer replicaties doen (1000)
+
+Varianties constrainen tot hetzelfde (alle RIx hebben dezelfde variantie en alle RIy hebben dezelfde)
+
+Random intercept varianties zijn allemaal exogeen en moeten dus worden geconstrained
+
+Within-person componenten (1ste tijdstip) zijn exogeen, volgende timepoints zijn endogeen en worden voorspeld dus residentiele varianties en covarianties.
