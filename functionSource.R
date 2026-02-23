@@ -437,16 +437,16 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
   # Within-segment variances and within-timespan covariances (RIx with RIy at same segment)
   ri_variances_and_within_seg_covs <- c()
   
-  # First: All RIx variances
+  # First: All RIx variances - CONSTRAINED EQUAL
   for (seg in 1:n_segments) {
     ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
-                                          sprintf("RIx%d ~~ varRIx%d*RIx%d", seg, seg, seg))
+                                          sprintf("RIx%d ~~ varRIx*RIx%d", seg, seg))
   }
   
-  # Second: All RIy variances
+  # Second: All RIy variances - CONSTRAINED EQUAL
   for (seg in 1:n_segments) {
     ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
-                                          sprintf("RIy%d ~~ varRIy%d*RIy%d", seg, seg, seg))
+                                          sprintf("RIy%d ~~ varRIy*RIy%d", seg, seg))
   }
   
   # Third: Within-segment RIx-RIy covariances (same timespan only)
@@ -543,7 +543,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     "wx1 ~~ wy1 # Covariance at T1",
     res_covs,
     "\n# 5. (Co)variances of Random Intercepts",
-    "# 5a. Variances and within-segment covariances",
+    "# 5a. Variances (constrained equal) and within-segment covariances",
     paste(ri_variances_and_within_seg_covs, collapse = "\n"),
     sprintf("\n# 5b. Across-segment covariances %s", 
             ifelse(n_segments > 1, across_seg_label, "")),
