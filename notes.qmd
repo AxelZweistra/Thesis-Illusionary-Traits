@@ -146,11 +146,13 @@ RI's niet geconstrained
 
 ```{r}
 source("functionSource.R")
+library(lavaanPlot)
 
-data <- DGM(timepoints = 21)
+data <- DGM(timepoints = 12)
 
-md <- sem(generate_segmented_riclpm(T = 21), data = data$data)
+md <- sem(generate_segmented_riclpm(T = 12, timespan = 2), data = data$data)
 
+lavaanPlot(md)
 summary(md)
 ```
 

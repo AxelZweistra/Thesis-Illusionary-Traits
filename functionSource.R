@@ -344,7 +344,7 @@ generate_riclpm <- function(T) {
 
 # ------------------------------------------------------------------------------
 
-# Generate MRI-CLPM model specification
+# Generate SRI-CLPM model specification
 # T: total number of timepoints, timespan: timepoints on which RI's are estimated
 # across_seg_cov: has to be "zero", "free" or "toeplitz" 
 
@@ -417,7 +417,9 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     paths_wy <- ""
   }
   
-  # --- 6. Constrained Correlated Residuals ---
+  # --- 6. Covariances ---
+  # First wave: covariance (exogenous)
+  # Subsequent waves: constrained correlated residuals (endogenous)
   if (T > 1) {
     res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
   } else {
@@ -425,8 +427,18 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
   }
   
   # --- 7. Variances of Within-person Components ---
-  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
-  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
+  # First wave: variance (exogenous, no predictors)
+  var_wx1 <- "wx1 ~~ wx1"
+  var_wy1 <- "wy1 ~~ wy1"
+  
+  # Subsequent waves: residual variances (endogenous, have predictors)
+  if (T > 1) {
+    var_wx_rest <- paste(sprintf("wx%d ~~ wx%d", 2:T, 2:T), collapse = "\n")
+    var_wy_rest <- paste(sprintf("wy%d ~~ wy%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    var_wx_rest <- ""
+    var_wy_rest <- ""
+  }
   
   # --- 8. Fix Observed Variances to Zero ---
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
@@ -548,9 +560,13 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     sprintf("\n# 5b. Across-segment covariances %s", 
             ifelse(n_segments > 1, across_seg_label, "")),
     if (length(ri_across_seg_covs) > 0) paste(ri_across_seg_covs, collapse = "\n") else "# (No across-segment covariances for single segment)",
-    "\n# 6. (Residual) variances of within-person components",
-    var_wx,
-    var_wy,
+    "\n# 6. Variances and residual variances of within-person components",
+    "# 6a. First wave variances (exogenous)",
+    var_wx1,
+    var_wy1,
+    "# 6b. Subsequent wave residual variances (endogenous)",
+    var_wx_rest,
+    var_wy_rest,
     "\n# 7. Fix observed variances to zero",
     zero_var_x,
     zero_var_y,
