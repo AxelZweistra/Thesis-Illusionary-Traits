@@ -282,7 +282,7 @@ generate_riclpm <- function(T) {
   
   # Input validation
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
-    stop("T must be an integer greater or equal to 3.") # RI-CLPM is not identified at T < 3
+    stop("T must be an integer greater or equal to 3.")
   }
   
   # Generate model components
@@ -296,47 +296,84 @@ generate_riclpm <- function(T) {
   wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
   
   # Autoregressive and cross-lagged paths (from T2 to T)
-  timepoints_reg <- 2:T
-  lagged_timepoints <- 1:(T - 1)
-  paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", timepoints_reg, lagged_timepoints, lagged_timepoints), collapse = "\n")
-  paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", timepoints_reg, lagged_timepoints, lagged_timepoints), collapse = "\n")
+  if (T > 1) {
+    timepoints_reg <- 2:T
+    lagged_timepoints <- 1:(T - 1)
+    paths_wx <- paste(sprintf("wx%d ~ ax*wx%d + by*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+    paths_wy <- paste(sprintf("wy%d ~ bx*wx%d + ay*wy%d", 
+                              timepoints_reg, lagged_timepoints, lagged_timepoints), 
+                      collapse = "\n")
+  } else {
+    paths_wx <- ""
+    paths_wy <- ""
+  }
   
-  # Constrained correlated residuals (from T2 to T)
-  res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
+  # Covariances
+  # First wave: covariance (exogenous)
+  # Subsequent waves: constrained correlated residuals (endogenous)
+  if (T > 1) {
+    res_covs <- paste(sprintf("wx%d ~~ ur*wy%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    res_covs <- ""
+  }
   
-  # Variances of within-person components (all timepoints)
-  var_wx <- paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "\n")
-  var_wy <- paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "\n")
+  # Variances of within-person components
+  # First wave: variance (exogenous, no predictors)
+  var_wx1 <- "wx1 ~~ wx1"
+  var_wy1 <- "wy1 ~~ wy1"
+  
+  # Subsequent waves: residual variances (endogenous, have predictors)
+  if (T > 1) {
+    var_wx_rest <- paste(sprintf("wx%d ~~ wx%d", 2:T, 2:T), collapse = "\n")
+    var_wy_rest <- paste(sprintf("wy%d ~~ wy%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    var_wx_rest <- ""
+    var_wy_rest <- ""
+  }
   
   # Fix observed variances to zero
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
-  
   # Assemble final model string
   
   components <- c(
-    "# 1. Random Intercepts", ri_x, ri_y,
-    "\n# 2. Within-person components (measurement)", wx_defs, wy_defs,
-    "\n# 3. Autoregressive and cross-lagged paths", paths_wx, paths_wy,
+    "# 1. Random Intercepts", 
+    ri_x, 
+    ri_y,
+    "\n# 2. Within-person components", 
+    wx_defs, 
+    wy_defs,
+    "\n# 3. Autoregressive and cross-lagged paths", 
+    paths_wx, 
+    paths_wy,
     "\n# 4. Covariances",
-    "wx1 ~~ T1_cov*wy1 # Covariance at T1",
+    "wx1 ~~ wy1 # Covariance at T1",
     res_covs,
     "\n# 5. (Co)variances of Random Intercepts",
     "RIx ~~ varRIx*RIx",
     "RIy ~~ varRIy*RIy",
     "RIx ~~ covRI*RIy",
-    "\n# 6. (Residual) variances of within-person components (constrained equal)",
-    var_wx,
-    var_wy,
+    "\n# 6. Variances and residual variances of within-person components",
+    "# 6a. First wave variances (exogenous)",
+    var_wx1,
+    var_wy1,
+    "# 6b. Subsequent wave residual variances (endogenous)",
+    var_wx_rest,
+    var_wy_rest,
     "\n# 7. Fix observed variances to zero",
     zero_var_x,
     zero_var_y,
     "\n# 8. Fix RI covariances with first state to zero",
-    "wx1 ~~ 0*RIx", "wx1 ~~ 0*RIy", "wy1 ~~ 0*RIx", "wy1 ~~ 0*RIy"
+    "wx1 ~~ 0*RIx", 
+    "wx1 ~~ 0*RIy", 
+    "wy1 ~~ 0*RIx", 
+    "wy1 ~~ 0*RIy"
   )
   
-  # add together, skip empty strings and add linebreaks
+  # Add together, skip empty strings and add linebreaks
   model_string <- paste(components[components != ""], collapse = "\n")
   
   return(model_string)
@@ -461,10 +498,10 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
                                           sprintf("RIy%d ~~ varRIy*RIy%d", seg, seg))
   }
   
-  # Third: Within-segment RIx-RIy covariances (same timespan only)
+  # Third: Within-segment RIx-RIy covariances - CONSTRAINED EQUAL ACROSS SEGMENTS
   for (seg in 1:n_segments) {
     ri_variances_and_within_seg_covs <- c(ri_variances_and_within_seg_covs,
-                                          sprintf("RIx%d ~~ covRI%d*RIy%d", seg, seg, seg))
+                                          sprintf("RIx%d ~~ covRI*RIy%d", seg, seg))
   }
   
   # Across-segment covariances
@@ -499,12 +536,12 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
       }
       
     } else if (across_seg_cov == "toeplitz") {
-      # Toeplitz structure with cross-lagged covariances (DEFAULT)
-      across_seg_label <- "(Toeplitz Structure)"
+      # Block Toeplitz structure: X->X, Y->Y, X->Y, Y->X each have their own lag parameters
+      across_seg_label <- "(Block Toeplitz Structure)"
       
       max_lag <- n_segments - 1
       
-      # Within-variable Toeplitz
+      # Within-variable Toeplitz (X->X and Y->Y)
       for (lag in 1:max_lag) {
         for (seg1 in 1:(n_segments - lag)) {
           seg2 <- seg1 + lag
@@ -516,13 +553,16 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
         }
       }
       
-      # Cross-variable Toeplitz
+      # Cross-variable Toeplitz (X->Y and Y->X separate)
       for (lag in 1:max_lag) {
         for (seg1 in 1:(n_segments - lag)) {
           seg2 <- seg1 + lag
           
+          # X -> Y covariances (all same-lag X->Y constrained equal)
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIx%d ~~ covRIxy_lag%d*RIy%d", seg1, lag, seg2))
+          
+          # Y -> X covariances (all same-lag Y->X constrained equal, but different from X->Y)
           ri_across_seg_covs <- c(ri_across_seg_covs,
                                   sprintf("RIy%d ~~ covRIyx_lag%d*RIx%d", seg1, lag, seg2))
         }
@@ -555,7 +595,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     "wx1 ~~ wy1 # Covariance at T1",
     res_covs,
     "\n# 5. (Co)variances of Random Intercepts",
-    "# 5a. Variances (constrained equal) and within-segment covariances",
+    "# 5a. Variances (constrained equal) and within-segment covariances (constrained equal)",
     paste(ri_variances_and_within_seg_covs, collapse = "\n"),
     sprintf("\n# 5b. Across-segment covariances %s", 
             ifelse(n_segments > 1, across_seg_label, "")),

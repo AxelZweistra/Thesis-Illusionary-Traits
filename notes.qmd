@@ -136,24 +136,24 @@ Random intercept varianties zijn allemaal exogeen en moeten dus worden geconstra
 
 Within-person componenten (1ste tijdstip) zijn exogeen, volgende timepoints zijn endogeen en worden voorspeld dus residentiele varianties en covarianties.
 
-### To do
+### Vragen korte meeting
 
-Mailtje sturen naar Ellen, verheldering variance constraints en nieuwe meeting plannen
+Covariances van alle RI's worden nu geconstrained naar 0 met de eerste metingen, op dezelfde manier als in de code van Bailey.
 
-Checken of alle RIx en alle RIy constrained zijn
-
-RI's niet geconstrained
+IMPORTANT: FIX OOK generate_riclpm functie
 
 ```{r}
 source("functionSource.R")
 library(lavaanPlot)
 
-data <- DGM(timepoints = 12)
+data <- DGM(timepoints = 6)
 
-md <- sem(generate_segmented_riclpm(T = 12, timespan = 2), data = data$data)
+md <- sem(generate_segmented_riclpm(T = 6, timespan = 2), data = data$data)
 
 lavaanPlot(md)
 summary(md)
+
+cat(generate_segmented_riclpm(T=6, timespan = 2))
 ```
 
 Idea for a new sim:
@@ -165,3 +165,13 @@ Questions this could answer:
 Does the SRI-CLPM also offer benefits over a RI-CLPM when the DGM resembles a RI-CLPM + time-varying confounding.
 
 Does the SRI-CLPM 'overcorrect' when a stable component is present. i.e. is the same variance captured multiple times in different random intercepts.
+
+#### Notes
+
+within-segment covariances CovRIx1,2,3 constrained tot hetzelfde
+
+Cross-lagged covarianties tussen RIx en RIy moeten ook toeplitz, maar niet equal X -\> Y, Y -\> X
+
+Stable time-invariant confounding, met globaal RI op x en y.
+
+T = 6, 12, 24, evt 48
