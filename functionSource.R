@@ -247,12 +247,29 @@ generate_clpm <- function(T){
     paths_y <- ""
   }
   
-  # Variances of observed variables at all timepoints
-  var_x <- paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse = "\n")
-  var_y <- paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse = "\n")
+  # Variances of observed variables
+  # First wave: free variance (exogenous starting values)
+  var_x1 <- "x1 ~~ x1"
+  var_y1 <- "y1 ~~ y1"
   
-  # Covariances between x and y at all timepoints
-  cov_xy <- paste(sprintf("x%d ~~ x%d_y%d_cov*y%d", 1:T, 1:T, 1:T, 1:T), collapse = "\n")
+  # Subsequent waves: residual/innovation variances (constrained equal)
+  if (T > 1) {
+    var_x_rest <- paste(sprintf("x%d ~~ ivx*x%d", 2:T, 2:T), collapse = "\n")
+    var_y_rest <- paste(sprintf("y%d ~~ ivy*y%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    var_x_rest <- ""
+    var_y_rest <- ""
+  }
+  
+  # Covariance at first wave (exogenous)
+  cov_xy1 <- "x1 ~~ y1 # Covariance at T1"
+  
+  # Correlated residuals at subsequent waves (constrained equal)
+  if (T > 1) {
+    res_covs <- paste(sprintf("x%d ~~ ur*y%d", 2:T, 2:T), collapse = "\n")
+  } else {
+    res_covs <- ""
+  }
   
   # Assemble final model string
   
@@ -260,11 +277,16 @@ generate_clpm <- function(T){
     "# 1. Autoregressive and cross-lagged paths",
     paths_x,
     paths_y,
-    "\n# 2. Variances of observed variables",
-    var_x,
-    var_y,
-    "\n# 3. Covariances between x and y at each timepoint",
-    cov_xy
+    "\n# 2. Covariances",
+    cov_xy1,
+    res_covs,
+    "\n# 3. Variances of observed variables",
+    "# 3a. First wave variances (exogenous starting values)",
+    var_x1,
+    var_y1,
+    "# 3b. Subsequent wave innovation variances (constrained equal)",
+    var_x_rest,
+    var_y_rest
   )
   
   # Add together, skip empty strings and add linebreaks
@@ -272,7 +294,6 @@ generate_clpm <- function(T){
   
   return(model_string)
 }
-
 # ------------------------------------------------------------------------------
 
 # Generate RI-CLPM model specification

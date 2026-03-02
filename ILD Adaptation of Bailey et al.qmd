@@ -2384,8 +2384,10 @@ New combined DGM testing
 source("functionSource.R")
 
 # Some validation
-sim_output <- DGM(N = 100000, timepoints = 50, 
-                  autocorr_effects = 0.3,
+sim_output <- DGM_RICLPM(N = 100000, timepoints = 30, 
+                  n_x_confounders = 0,
+                  n_y_confounders = 0,
+                  autocorr_effects = 0,
                   ri_var_x = 3,
                   ri_var_y = 3,
                   ri_cor = .5)
