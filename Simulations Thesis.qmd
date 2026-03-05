@@ -1,0 +1,140 @@
+---
+title: "Thesis Simulations"
+author: "A.P. Zweistra"
+format: html
+editor: visual
+---
+
+This is intended to be the final, complete file that contains all necessary code to reproduce the results presented in the thesis (in combination with the "functionSource.R" file.
+
+### Initialize
+
+```{r}
+library(mvtnorm)
+library(tidyverse)
+library(lavaan)
+
+# Load function source file
+source("functionSource.R")
+
+## Function definitions from Bailey, 2024
+row <- function( M ){
+    if( ! ( is.matrix(M) && dim(M)[1] == dim(M)[2] && dim(M)[1]>0 ) ){
+        rowM <- NULL
+    } else {
+        F <- dim(M)[1]
+        rowM <- matrix( NA, nrow=F^2, ncol=1)
+        for ( r in (1:F) ) {
+            for( c in (1:F) ) {
+                rowM[ c+F*(r-1), 1 ] <- M[r,c]
+            }
+        }
+    }
+    return( rowM )
+}
+irow <- function( rowM ){
+    if( ! ( !is.null(rowM) && ( is.matrix(rowM) || (is.array(rowM) && length( which( dim(rowM) > 1 ) ) == 1) ) && dim(rowM)[1]>0 && dim(rowM)[2]==1 ) ){
+        M <- NULL
+    } else {
+        F <- sqrt( length( rowM ) )
+        M <- matrix( NA, nrow=F, ncol=F )
+        for ( r in (1:F) ) {
+            for ( c in (1:F) ) {
+                M[r,c] <- rowM[ c+F*(r-1) ]
+            }
+        }
+    }
+    return( M )
+}
+```
+
+### Simulation 1: the performance of the RI-CLPM over time.
+
+2x2 matrix with DGM params nconf(4,6) and ax(.2,.3). Illustrate role of "temporal stability" in Illusory Traits. Illustrate direct relationship between illusory random intercept variance and less biased estimation of cross-lagged params. Population matrices.
+
+```{r}
+autoreg <- c(.2,.3)
+nconf <- c(4,6)
+
+# general settings
+timepoints <- 30
+seed <- 42
+filename_prefix <- "Simulation1" # sets name for saved output
+data_struct <- create_metadata() # returns empty results with metadata
+
+for (i in autoreg){
+  for (j in nconf){
+
+    # empty object per condition results
+    condition_results <- data.frame(
+        autocorr = integer(),
+        timepoints_used = integer(),
+        iteration = integer(),
+        varRIx = numeric(),
+        varRIy = numeric(),
+        convergence = logical(),
+        fit_measures = I(list()),  
+        coefficients = I(list()),  
+        processing_time = numeric()
+      )
+    
+    # generate data
+    data <- DGM(autocorr_effects = i,
+                n_x_confounders = j,
+                n_y_confounders = j,
+                timepoints = timepoints,
+                seed = seed)
+    
+    # fit models on multiples of 3
+    for (x in seq(3,timepoints,3)){
+      start_time <- Sys.time()
+      
+      # take subset of data, fit model
+      dataslice <- data$data[1:x,]
+      modelSpec <- generate_riclpm(x)
+      fit <- sem(modelSpec, dataslice)
+      
+      converged <- lavInspect(fit, "converged")
+      fit_measures <- fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli",
+                                       "rmsea", "srmr"))
+      
+      coeff <- if(converged){coef(fit)}else{NULL}
+      
+      condition_results <- rbind(condition_results, data.frame(
+        autocorr = conditions_autocorr[a],  
+        timepoints_used = i,
+        iteration = i/3,
+        varRIx = if(converged) coef(fit)["varRIx"] else NA,
+        varRIy = if(converged) coef(fit)["varRIy"] else NA,
+        convergence = converged,
+        fit_measures = I(list(fit_measures)),
+        coefficients = I(list(coeff)),
+        processing_time = as.numeric(difftime(Sys.time(), start_time, 
+                                              units = "secs"))
+      ))
+      rm(fit) #remove fit object so it doesnt clog up memory
+    }
+    data_struct$results <- rbind(data_struct$results, condition_results)
+    
+    filename <- save_clear(data_struct, filename_prefix)
+    
+    cat("Completed Sim with autoregressive: ", i, " and nconf: ", j)
+    
+    rm(data)
+    gc()
+    
+  }
+}
+```
+
+### Simulation 2: the SRI-CLPM
+
+```{r}
+
+```
+
+### Simulation 3: 
+
+```{r}
+
+```
