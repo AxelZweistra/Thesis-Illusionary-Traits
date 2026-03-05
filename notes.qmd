@@ -921,8 +921,6 @@ cat("\nSimulation complete!\n")
 For our final results, we want to show the performance of our new model under all kinds of DGM. Therefore, I developed a new more flexible DGM function that is able to generate data according to any stationary specification.
 
 ```{r}
-source("functionSource.R")
-
 DGM <- function(N = 20000, 
                 autocorr_effects = 0.2, 
                 timepoints = 100, 
@@ -961,7 +959,7 @@ DGM <- function(N = 20000,
   # --- Generate Time-Varying Data (CLPM process) ---
   
   if (include_time_varying_confounding) {
-    # Original DGM with time-varying confounders
+    # Original DGM with time-varying confounders (taken from Bailey et al. 2024)
     
     # Total number of variables (X, Y, and confounders)
     v <- c1 + c2 + 2
@@ -1026,7 +1024,7 @@ DGM <- function(N = 20000,
     Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
   }
   
-  # --- Generate time-varying data ---
+  # --- Generate data ---
   
   # Create empty dataframe
   df_within <- matrix(NA, nrow = N, ncol = 2*T)
@@ -1045,7 +1043,7 @@ DGM <- function(N = 20000,
     df_within[, i+T] <- D[, 2]
   }
   
-  # --- Generate Random Intercepts (Time-Invariant Confounders) ---
+  # --- Generate Random Intercepts (Time-Invariant Confounders) If Needed ---
   
   if (include_time_invariant_confounding) {
     # Calculate covariance from correlation and variances
@@ -1154,7 +1152,6 @@ summary(sem(generate_segmented_riclpm_global(20), data = BOTHdata$data))
 ### CLPM vs RI-CLPM vs SRI-CLPM vs SRI-CLPM-Global
 ### Fixed: N = 250, T = 6, timespan = 3, 2000 replications
 
-source("functionSource.R")
 library(lavaan)
 
 # ==============================================================================
@@ -1164,7 +1161,7 @@ library(lavaan)
 n_replications  <- 2000
 N_participants  <- 250
 timepoints      <- 6
-timespan        <- 3
+timespan        <- 2
 across_seg_cov  <- "toeplitz"
 
 # True DGM parameters (shared across all conditions)
@@ -1181,170 +1178,94 @@ filename_prefix <- "sim_dgm_comparison_T6"
 # ==============================================================================
 # DGM CONDITIONS
 # ==============================================================================
-# 1. Pure CLPM      – no confounding of any kind
-# 2. RI-CLPM        – time-invariant confounding only (ri_var = 1, ri_cor = .1)
-# 3. Time-varying   – time-varying confounding only  (default: 5 confounders each)
-# 4. Combined       – both types of confounding
-
 dgm_conditions <- list(
-  list(
-    name              = "Pure-CLPM",
-    n_x_confounders   = 0,
-    n_y_confounders   = 0,
-    ri_var_x          = 0,
-    ri_var_y          = 0,
-    ri_cor            = 0
-  ),
-  list(
-    name              = "RI-CLPM",
-    n_x_confounders   = 0,
-    n_y_confounders   = 0,
-    ri_var_x          = 1,
-    ri_var_y          = 1,
-    ri_cor            = 0.1
-  ),
-  list(
-    name              = "Time-Varying",
-    n_x_confounders   = 5,
-    n_y_confounders   = 5,
-    ri_var_x          = 0,
-    ri_var_y          = 0,
-    ri_cor            = 0
-  ),
-  list(
-    name              = "Combined",
-    n_x_confounders   = 5,
-    n_y_confounders   = 5,
-    ri_var_x          = 1,
-    ri_var_y          = 1,
-    ri_cor            = 0.1
-  )
+  list(name = "Pure-CLPM",    n_x_confounders = 0, n_y_confounders = 0, ri_var_x = 0, ri_var_y = 0, ri_cor = 0),
+  list(name = "RI-CLPM",      n_x_confounders = 0, n_y_confounders = 0, ri_var_x = 1, ri_var_y = 1, ri_cor = 0.1),
+  list(name = "Time-Varying", n_x_confounders = 5, n_y_confounders = 5, ri_var_x = 0, ri_var_y = 0, ri_cor = 0),
+  list(name = "Combined",     n_x_confounders = 5, n_y_confounders = 5, ri_var_x = 1, ri_var_y = 1, ri_cor = 0.1)
 )
 
 # ==============================================================================
-# MODEL SPECIFICATIONS (generated once – same across DGM conditions)
+# MODEL SPECIFICATIONS 
 # ==============================================================================
 
 modelSpec_clpm       <- generate_clpm(timepoints)
 modelSpec_riclpm     <- generate_riclpm(timepoints)
-modelSpec_sri        <- generate_segmented_riclpm(timepoints,
-                                                  timespan        = timespan,
-                                                  across_seg_cov  = across_seg_cov)
-# Add the global segmented RI-CLPM model
-modelSpec_sri_global <- generate_segmented_riclpm_global(timepoints,
-                                                         timespan        = timespan,
-                                                         across_seg_cov  = across_seg_cov)
+modelSpec_sri        <- generate_segmented_riclpm(timepoints, timespan = timespan, 
+                                                  across_seg_cov = across_seg_cov)
+modelSpec_sri_global <- generate_segmented_riclpm_global(timepoints, timespan = timespan, 
+                                                         across_seg_cov = across_seg_cov)
 
 cat("=== Simulation: DGM Comparison ===\n")
 cat("N =", N_participants, "| T =", timepoints, "| Replications =", n_replications, "\n")
 cat("Timespan (SRI-CLPM):", timespan, "| Across-seg cov:", across_seg_cov, "\n\n")
 
 # ==============================================================================
-# HELPER: safe extraction from a fitted lavaan object
+# HELPER FUNCTIONS
 # ==============================================================================
 
 extract_fit <- function(fit_obj, converged, param_name) {
-  if (converged && param_name %in% names(coef(fit_obj)))
-    coef(fit_obj)[param_name]
-  else
-    NA_real_
+  if (converged && param_name %in% names(coef(fit_obj))) coef(fit_obj)[param_name] else NA_real_
 }
 
 extract_se <- function(se_vec, param_name) {
-  if (!is.null(se_vec) && param_name %in% names(se_vec))
-    se_vec[param_name]
-  else
-    NA_real_
+  if (!is.null(se_vec) && param_name %in% names(se_vec)) se_vec[param_name] else NA_real_
 }
 
-# ==============================================================================
-# HELPER: fit one lavaan model and return a result row
-# ==============================================================================
-
-fit_model <- function(model_spec, data_df, model_label, dgm_label,
-                      rep_id, true_bx, true_by) {
-
+# MEMORY OPTIMIZATION: Return a lightweight `list` instead of a `data.frame`
+fit_model <- function(model_spec, data_df, model_label, dgm_label, rep_id, true_bx, true_by) {
   start_t <- Sys.time()
-
-  fit <- tryCatch(
-    sem(model = model_spec, data = data_df, estimator = "ML"),
-    error = function(e) NULL
-  )
+  
+  fit <- tryCatch(sem(model = model_spec, data = data_df, estimator = "ML"), error = function(e) NULL)
 
   if (!is.null(fit)) {
-
     converged   <- lavInspect(fit, "converged")
     post_check  <- tryCatch(lavInspect(fit, "post.check"), error = function(e) FALSE)
-    n_iter      <- tryCatch(fit@optim$iterations,          error = function(e) NA_integer_)
+    n_iter      <- tryCatch(fit@optim$iterations, error = function(e) NA_integer_)
 
     coef_vec <- if (converged) coef(fit) else NULL
     se_vec   <- if (converged) tryCatch(sqrt(diag(vcov(fit))), error = function(e) NULL) else NULL
 
     fit_meas <- tryCatch(
-      fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli",
-                         "rmsea", "srmr", "aic", "bic")),
-      error = function(e) setNames(rep(NA_real_, 9),
-                                   c("chisq","df","pvalue","cfi","tli",
-                                     "rmsea","srmr","aic","bic"))
+      fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+      error = function(e) setNames(rep(NA_real_, 9), c("chisq","df","pvalue","cfi","tli","rmsea","srmr","aic","bic"))
     )
-
   } else {
     converged  <- FALSE
     post_check <- FALSE
     n_iter     <- NA_integer_
     coef_vec   <- NULL
     se_vec     <- NULL
-    fit_meas   <- setNames(rep(NA_real_, 9),
-                           c("chisq","df","pvalue","cfi","tli",
-                             "rmsea","srmr","aic","bic"))
+    fit_meas   <- setNames(rep(NA_real_, 9), c("chisq","df","pvalue","cfi","tli","rmsea","srmr","aic","bic"))
   }
 
-  # Extract focal parameters
-  bx  <- extract_fit(fit, converged, "bx")
-  by  <- extract_fit(fit, converged, "by")
-  ax  <- extract_fit(fit, converged, "ax")
-  ay  <- extract_fit(fit, converged, "ay")
-
-  bx_se <- extract_se(se_vec, "bx")
-  by_se <- extract_se(se_vec, "by")
-  ax_se <- extract_se(se_vec, "ax")
-  ay_se <- extract_se(se_vec, "ay")
-
-  varRIx    <- extract_fit(fit, converged, "varRIx")
-  varRIy    <- extract_fit(fit, converged, "varRIy")
-  varRIx_se <- extract_se(se_vec, "varRIx")
-  varRIy_se <- extract_se(se_vec, "varRIy")
-  covRI     <- extract_fit(fit, converged, "covRI")
-
-  if (!is.null(fit)) rm(fit)
-
-  data.frame(
+  bx <- extract_fit(fit, converged, "bx")
+  by <- extract_fit(fit, converged, "by")
+  ax <- extract_fit(fit, converged, "ax")
+  ay <- extract_fit(fit, converged, "ay")
+  
+  list(
     replication      = rep_id,
     dgm_condition    = dgm_label,
     model_type       = model_label,
-
     convergence      = converged,
     post_check       = post_check,
     n_iterations     = n_iter,
-
     bx               = bx,
     by               = by,
-    bx_se            = bx_se,
-    by_se            = by_se,
+    bx_se            = extract_se(se_vec, "bx"),
+    by_se            = extract_se(se_vec, "by"),
     bias_bx          = bx - true_bx,
     bias_by          = by - true_by,
-
     ax               = ax,
     ay               = ay,
-    ax_se            = ax_se,
-    ay_se            = ay_se,
-
-    varRIx           = varRIx,
-    varRIy           = varRIy,
-    varRIx_se        = varRIx_se,
-    varRIy_se        = varRIy_se,
-    covRI            = covRI,
-
+    ax_se            = extract_se(se_vec, "ax"),
+    ay_se            = extract_se(se_vec, "ay"),
+    varRIx           = extract_fit(fit, converged, "varRIx"),
+    varRIy           = extract_fit(fit, converged, "varRIy"),
+    varRIx_se        = extract_se(se_vec, "varRIx"),
+    varRIy_se        = extract_se(se_vec, "varRIy"),
+    covRI            = extract_fit(fit, converged, "covRI"),
     chisq            = fit_meas["chisq"],
     df               = fit_meas["df"],
     pvalue           = fit_meas["pvalue"],
@@ -1354,28 +1275,57 @@ fit_model <- function(model_spec, data_df, model_label, dgm_label,
     srmr             = fit_meas["srmr"],
     aic              = fit_meas["aic"],
     bic              = fit_meas["bic"],
-
-    processing_time  = as.numeric(difftime(Sys.time(), start_t, units = "secs")),
-
-    stringsAsFactors = FALSE,
-    row.names        = NULL
+    processing_time  = as.numeric(difftime(Sys.time(), start_t, units = "secs"))
   )
 }
 
 # ==============================================================================
-# MAIN SIMULATION LOOP
+# MAIN SIMULATION LOOP 
 # ==============================================================================
 
-data_struct <- create_metadata()
-start_time_total <- Sys.time()
 
-# Change from 3L to 4L because we're testing 4 models per replication
-all_results <- vector("list",
-                      length(dgm_conditions) * n_replications * 4L) 
-result_idx  <- 1L
+total_fits <- length(dgm_conditions) * n_replications * 4L
+replication_results <- data.frame(
+  replication      = integer(total_fits),
+  dgm_condition    = character(total_fits),
+  model_type       = character(total_fits),
+  convergence      = logical(total_fits),
+  post_check       = logical(total_fits),
+  n_iterations     = integer(total_fits),
+  bx               = numeric(total_fits),
+  by               = numeric(total_fits),
+  bx_se            = numeric(total_fits),
+  by_se            = numeric(total_fits),
+  bias_bx          = numeric(total_fits),
+  bias_by          = numeric(total_fits),
+  ax               = numeric(total_fits),
+  ay               = numeric(total_fits),
+  ax_se            = numeric(total_fits),
+  ay_se            = numeric(total_fits),
+  varRIx           = numeric(total_fits),
+  varRIy           = numeric(total_fits),
+  varRIx_se        = numeric(total_fits),
+  varRIy_se        = numeric(total_fits),
+  covRI            = numeric(total_fits),
+  chisq            = numeric(total_fits),
+  df               = numeric(total_fits),
+  pvalue           = numeric(total_fits),
+  cfi              = numeric(total_fits),
+  tli              = numeric(total_fits),
+  rmsea            = numeric(total_fits),
+  srmr             = numeric(total_fits),
+  aic              = numeric(total_fits),
+  bic              = numeric(total_fits),
+  processing_time  = numeric(total_fits),
+  stringsAsFactors = FALSE
+)
+
+# Start
+gc(verbose = FALSE) 
+start_time_total <- Sys.time()
+result_idx <- 1L
 
 for (dgm in dgm_conditions) {
-
   cat("\n--- DGM condition:", dgm$name, "---\n")
 
   for (rep in 1:n_replications) {
@@ -1386,7 +1336,7 @@ for (dgm in dgm_conditions) {
           "| Elapsed:", round(elapsed, 2), "min\n")
     }
 
-    # Generate data for this replication
+    # Generate data
     data <- DGM(
       N                = N_participants,
       timepoints       = timepoints,
@@ -1397,63 +1347,38 @@ for (dgm in dgm_conditions) {
       ri_var_x         = dgm$ri_var_x,
       ri_var_y         = dgm$ri_var_y,
       ri_cor           = dgm$ri_cor,
-      seed             = 427 + rep  # unique seed per replication
+      seed             = 427 + rep 
     )
 
-    # Fit CLPM
-    all_results[[result_idx]] <- fit_model(
-      modelSpec_clpm, data$data, "CLPM", dgm$name,
-      rep, true_bx, true_by
-    )
+    # Insert list values directly into our pre-allocated dataframe
+    replication_results[result_idx, ] <- fit_model(modelSpec_clpm, data$data, "CLPM", dgm$name, rep, true_bx, true_by)
     result_idx <- result_idx + 1L
 
-    # Fit RI-CLPM
-    all_results[[result_idx]] <- fit_model(
-      modelSpec_riclpm, data$data, "RI-CLPM", dgm$name,
-      rep, true_bx, true_by
-    )
+    replication_results[result_idx, ] <- fit_model(modelSpec_riclpm, data$data, "RI-CLPM", dgm$name, rep, true_bx, true_by)
     result_idx <- result_idx + 1L
 
-    # Fit SRI-CLPM
-    all_results[[result_idx]] <- fit_model(
-      modelSpec_sri, data$data, "SRI-CLPM", dgm$name,
-      rep, true_bx, true_by
-    )
+    replication_results[result_idx, ] <- fit_model(modelSpec_sri, data$data, "SRI-CLPM", dgm$name, rep, true_bx, true_by)
     result_idx <- result_idx + 1L
 
-    # Fit SRI-CLPM Global (New Model Added)
-    all_results[[result_idx]] <- fit_model(
-      modelSpec_sri_global, data$data, "SRI-CLPM-Global", dgm$name,
-      rep, true_bx, true_by
-    )
+    replication_results[result_idx, ] <- fit_model(modelSpec_sri_global, data$data, "SRI-CLPM-Global", dgm$name, rep, true_bx, true_by)
     result_idx <- result_idx + 1L
 
+    # Aggressive memory cleanup
     rm(data)
-    if (rep %% 100 == 0) gc(verbose = FALSE)
+    if (rep %% 20 == 0) gc(verbose = FALSE) # Clear loose overhead frequently
   }
 }
 
-replication_results <- do.call(rbind, all_results[1:(result_idx - 1L)])
-rownames(replication_results) <- NULL
 
-# ==============================================================================
-# SAVE
-# ==============================================================================
-
+data_struct <- create_metadata()
 data_struct$results <- replication_results
 data_struct$simulation_parameters <- list(
-  n_replications   = n_replications,
-  N_participants   = N_participants,
-  timepoints       = timepoints,
-  timespan         = timespan,
-  across_seg_cov   = across_seg_cov,
-  autocorr_level   = autocorr_level,
-  beta_focal       = beta_focal,
-  dgm_conditions   = dgm_conditions,
-  true_bx          = true_bx,
-  true_by          = true_by,
-  true_ax          = true_ax,
-  true_ay          = true_ay
+  n_replications   = n_replications, N_participants   = N_participants,
+  timepoints       = timepoints, timespan         = timespan,
+  across_seg_cov   = across_seg_cov, autocorr_level   = autocorr_level,
+  beta_focal       = beta_focal, dgm_conditions   = dgm_conditions,
+  true_bx          = true_bx, true_by          = true_by,
+  true_ax          = true_ax, true_ay          = true_ay
 )
 
 filename <- save_clear(data_struct, filename_prefix)
@@ -1462,83 +1387,223 @@ total_time <- difftime(Sys.time(), start_time_total, units = "mins")
 cat("\n=== Simulation Completed ===\n")
 cat("Total time:", round(total_time, 2), "minutes\n")
 cat("Results saved to:", filename, "\n\n")
-
-# ==============================================================================
-# SUMMARY STATISTICS
-# ==============================================================================
-
-cat("=== SUMMARY STATISTICS ===\n\n")
-
-# Convergence rates
-cat("--- Convergence Rates ---\n")
-conv_summary <- aggregate(
-  convergence ~ dgm_condition + model_type,
-  data = replication_results,
-  FUN  = function(x) paste0(sum(x), "/", length(x),
-                            " (", round(mean(x) * 100, 1), "%)")
-)
-print(conv_summary)
-
-# Post-check failures (among converged)
-cat("\n--- Post-Check Failures (among converged) ---\n")
-converged_only <- replication_results[replication_results$convergence == TRUE, ]
-postcheck_summary <- aggregate(
-  post_check ~ dgm_condition + model_type,
-  data = converged_only,
-  FUN  = function(x) paste0(sum(!x), "/", length(x),
-                            " (", round((1 - mean(x)) * 100, 1), "%)")
-)
-print(postcheck_summary)
-
-# Bias
-cat("\n--- Mean Bias in Cross-lagged Parameters ---\n")
-bias_summary <- aggregate(
-  cbind(bias_bx, bias_by) ~ dgm_condition + model_type,
-  data = converged_only,
-  FUN  = function(x) round(mean(x, na.rm = TRUE), 4)
-)
-print(bias_summary)
-
-# RMSE
-cat("\n--- RMSE of Cross-lagged Parameters ---\n")
-rmse_summary <- aggregate(
-  cbind(bias_bx, bias_by) ~ dgm_condition + model_type,
-  data = converged_only,
-  FUN  = function(x) round(sqrt(mean(x^2, na.rm = TRUE)), 4)
-)
-colnames(rmse_summary)[3:4] <- c("rmse_bx", "rmse_by")
-print(rmse_summary)
-
-# Mean parameter estimates
-cat("\n--- Mean Parameter Estimates ---\n")
-param_summary <- aggregate(
-  cbind(bx, by, ax, ay, varRIx, varRIy) ~ dgm_condition + model_type,
-  data = converged_only,
-  FUN  = function(x) round(mean(x, na.rm = TRUE), 4)
-)
-print(param_summary)
-
-# Model fit
-cat("\n--- Mean Fit Indices ---\n")
-fit_summary <- aggregate(
-  cbind(cfi, tli, rmsea, srmr, aic, bic) ~ dgm_condition + model_type,
-  data = converged_only,
-  FUN  = function(x) round(mean(x, na.rm = TRUE), 3)
-)
-print(fit_summary)
-
-# Processing time
-cat("\n--- Mean Processing Time (seconds) ---\n")
-time_summary <- aggregate(
-  processing_time ~ dgm_condition + model_type,
-  data = replication_results,
-  FUN  = function(x) round(mean(x, na.rm = TRUE), 2)
-)
-print(time_summary)
-
-cat("\nSimulation complete!\n")
 ```
+
+#### Plotting
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+
+# ==============================================================================
+# LOAD & PREPARE DATA
+# ==============================================================================
+
+sim     <- sim_dgm_comparison_T6_20260303_103953
+results <- sim$results
+
+true_beta <- 0.1
+
+plot_data <- results %>%
+  filter(convergence == TRUE, post_check == TRUE) %>%
+  mutate(
+    model_type    = factor(model_type, levels = c("CLPM", "RI-CLPM", "SRI-CLPM")),
+    dgm_condition = factor(dgm_condition,
+                           levels = c("Pure-CLPM", "RI-CLPM",
+                                      "Time-Varying", "Combined"))
+  )
+
+dgm_levels <- levels(plot_data$dgm_condition)
+
+# ==============================================================================
+# PLOT 1 - Empirical Distribution of bx Estimates (one plot per DGM)
+# ==============================================================================
+
+p1_list <- lapply(dgm_levels, function(dgm) {
+  ggplot(filter(plot_data, dgm_condition == dgm),
+         aes(x = model_type, y = bx, fill = model_type)) +
+    geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+    geom_hline(yintercept = true_beta, linetype = "dashed",
+               color = "red", linewidth = 0.8) +
+    scale_fill_brewer(palette = "Blues", name = "Model") +
+    labs(
+      title = paste0("Distribution of bx Estimates - ", dgm),
+      y     = "Parameter Estimate",
+      x     = NULL
+    ) +
+    theme_minimal() +
+    theme(axis.text.x     = element_blank(),
+          legend.position = "bottom")
+})
+
+# ==============================================================================
+# PLOT 2 - Distribution of Estimated Standard Errors for bx (one plot per DGM)
+# ==============================================================================
+
+p2_list <- lapply(dgm_levels, function(dgm) {
+  ggplot(filter(plot_data, dgm_condition == dgm),
+         aes(x = model_type, y = bx_se, fill = model_type)) +
+    geom_boxplot(alpha = 0.7, outlier.shape = 21, outlier.alpha = 0.5) +
+    scale_fill_brewer(palette = "Greens", name = "Model") +
+    labs(
+      title = paste0("Distribution of SE(bx) - ", dgm),
+      y     = "Standard Error",
+      x     = NULL
+    ) +
+    theme_minimal() +
+    theme(axis.text.x     = element_blank(),
+          legend.position = "bottom")
+})
+
+# Print plots
+for (p in p1_list) print(p)
+for (p in p2_list) print(p)
+
+# ==============================================================================
+# TABLE 1 - Significance rates
+# Note: p-values not saved in results; significance derived from 95% CI
+# ==============================================================================
+
+significance_table <- plot_data %>%
+  mutate(
+    sig_bx = (bx - 1.96 * bx_se) > 0 | (bx + 1.96 * bx_se) < 0,
+    sig_by = (by - 1.96 * by_se) > 0 | (by + 1.96 * by_se) < 0
+  ) %>%
+  group_by(dgm_condition, model_type) %>%
+  summarise(
+    sig_bx_pct  = mean(sig_bx, na.rm = TRUE) * 100,
+    sig_by_pct  = mean(sig_by, na.rm = TRUE) * 100,
+    n_converged = n(),
+    .groups     = "drop"
+  )
+
+kable(significance_table,
+      digits    = 1,
+      col.names = c("DGM", "Model", "Sig. bx (%)", "Sig. by (%)", "Converged N"),
+      caption   = "Percentage of Significant Cross-Lagged Parameters (Alpha = .05, via 95% CI)")
+
+# ==============================================================================
+# TABLE 2 - SE Bias
+# ==============================================================================
+
+se_bias_analysis <- plot_data %>%
+  group_by(dgm_condition, model_type) %>%
+  summarise(
+    Empirical_SE      = sd(bx, na.rm = TRUE),
+    Mean_Estimated_SE = mean(bx_se, na.rm = TRUE),
+    Bias_Percent      = ((Mean_Estimated_SE - Empirical_SE) / Empirical_SE) * 100,
+    .groups           = "drop"
+  )
+
+kable(se_bias_analysis,
+      digits    = 3,
+      col.names = c("DGM", "Model", "Empirical SE", "Mean Estimated SE", "Bias (%)"),
+      caption   = "SE Bias in bx Estimates")
+
+# ==============================================================================
+# TABLE 3 - Coverage rates
+# ==============================================================================
+
+coverage_analysis <- plot_data %>%
+  mutate(
+    ci_lower = bx - 1.96 * bx_se,
+    ci_upper = bx + 1.96 * bx_se,
+    covered  = true_beta >= ci_lower & true_beta <= ci_upper
+  ) %>%
+  group_by(dgm_condition, model_type) %>%
+  summarise(
+    coverage_rate = mean(covered, na.rm = TRUE) * 100,
+    n_valid       = n(),
+    .groups       = "drop"
+  )
+
+kable(coverage_analysis,
+      digits    = 1,
+      col.names = c("DGM", "Model", "Coverage Rate (%)", "Valid Replications"),
+      caption   = "Coverage Rates: % of 95% CIs containing the True Value (0.1)")
+```
+
+Kleine sanity check - waarom werken de SRI-CLPM's zo slecht bij T=6?
+
+```{r}
+bx <- numeric(200)
+by <- numeric(200)
+
+bx1 <- numeric(200)
+by1 <- numeric(200)
+
+bx2 <- numeric(200)
+by2 <- numeric(200)
+
+rix <- numeric(200)
+riy <- numeric(200)
+
+for (i in seq(1:200)){
+  
+  data <- DGM(N = 250, timepoints = 15, autocorr_effects = .3, ri_var_x = 1, ri_var_y = 1, ri_cor = .1, seed = i)
+  
+  fit <- sem(generate_riclpm(15), data$data)
+  fit1 <- sem(generate_segmented_riclpm(15, timespan = 3), data$data)
+  fit2 <- sem(generate_segmented_riclpm_global(15, timespan = 3), data$data)  
+  
+  bx[i] <- coef(fit)["bx"]
+  by[i] <- coef(fit)["by"]
+  
+  bx1[i] <- coef(fit1)["bx"]
+  by1[i] <- coef(fit1)["by"]
+
+  bx2[i] <- coef(fit2)["bx"]
+  by2[i] <- coef(fit2)["by"]
+  
+  rix[i] <- coef(fit)["RIx"]
+  riy[i] <- coef(fit)["RIy"]
+}
+
+print("RI-CLPM")
+print("means")
+print(mean(bx))
+print(mean(by))
+
+print("sd")
+print(sd(bx))
+print(sd(by))
+
+print("SRI-CLPM -------")
+print("means")
+print(mean(bx1))
+print(mean(by1))
+
+print("sd")
+print(sd(bx1))
+print(sd(by1))
+
+print("SRI-CLPM-G -------")
+print("means")
+print(mean(bx2))
+print(mean(by2))
+
+print("sd")
+print(sd(bx2))
+print(sd(by2))
+```
+
+Takeaways from sanity checks:
+
+On few timepoints (6), using a timespan of 2 seems to really overcorrect for the combined confounding (means around .93)
+
+Increasing it to a timespan of 3 fixes the correction a lot, actually halves bias at the cost of a +- 20% increase in SE.
+
+Checking that the time-varying stuff still works for the new DGM:
+
+Increasing autocorr effects to .3 -\> makes the performance gap between RI-CLPM clearer, but not that much. Maybe its the T?
+
+T = 15: gap between RI-CLPM and SRI-CLPM becomes much clearer.
 
 Timepoints voor simulaties
 
 T = 6, 12, 24, evt 48
+
+N varieren van 150, 300?
+
+L = timespan length
