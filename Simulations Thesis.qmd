@@ -67,7 +67,7 @@ for (i in autoreg){
 
     # empty object per condition results
     condition_results <- data.frame(
-        autocorr = integer(),
+        autoreg = integer(),
         timepoints_used = integer(),
         iteration = integer(),
         varRIx = numeric(),
@@ -89,10 +89,8 @@ for (i in autoreg){
     for (x in seq(3,timepoints,3)){
       start_time <- Sys.time()
       
-      # take subset of data, fit model
-      dataslice <- data$data[1:x,]
-      modelSpec <- generate_riclpm(x)
-      fit <- sem(modelSpec, dataslice)
+      # fit model
+      fit <- sem(generate_riclpm(x), data$data)
       
       converged <- lavInspect(fit, "converged")
       fit_measures <- fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli",
@@ -101,9 +99,9 @@ for (i in autoreg){
       coeff <- if(converged){coef(fit)}else{NULL}
       
       condition_results <- rbind(condition_results, data.frame(
-        autocorr = conditions_autocorr[a],  
-        timepoints_used = i,
-        iteration = i/3,
+        autoreg = i,  
+        timepoints_used = x,
+        iteration = x/3,
         varRIx = if(converged) coef(fit)["varRIx"] else NA,
         varRIy = if(converged) coef(fit)["varRIy"] else NA,
         convergence = converged,
@@ -118,7 +116,7 @@ for (i in autoreg){
     
     filename <- save_clear(data_struct, filename_prefix)
     
-    cat("Completed Sim with autoregressive: ", i, " and nconf: ", j)
+    cat("Completed Sim with autoregressive: ", i, " and nconf: ", j, "\n")
     
     rm(data)
     gc()
@@ -129,11 +127,293 @@ for (i in autoreg){
 
 ### Simulation 2: the SRI-CLPM
 
-```{r}
+Demonstrate usability of SRI-CLPM, so realistic sample sizes, set default DGM parameters. Just time-varying confounding, T = 3.
 
+Plot idea, show 5 timepoints and plot the cross-lagged parameters with boxplots, with a line for the true value.
+
+Rough estimated runtime 9 hours.
+
+```{r}
+timepoints <- seq(6, 30, 6)
+replications <- 2000
+N <- 200
+seed <- 42
+
+true_bx <- 0.1
+true_by <- 0.1
+
+data_struct <- create_metadata()
+
+replication_results <- data.frame(
+  replication  = integer(),
+  timepoints   = integer(),
+  model_type   = character(),
+
+  # Convergence and diagnostics
+  convergence  = logical(),
+  post_check   = logical(),
+  n_iterations = integer(),
+
+  # Cross-lagged parameters
+  bx    = numeric(),
+  by    = numeric(),
+  bx_se = numeric(),
+  by_se = numeric(),
+  bias_bx = numeric(),
+  bias_by = numeric(),
+
+  # Autoregressive parameters
+  ax    = numeric(),
+  ay    = numeric(),
+  ax_se = numeric(),
+  ay_se = numeric(),
+
+  # Random intercept variances
+  varRIx    = numeric(),
+  varRIy    = numeric(),
+  varRIx_se = numeric(),
+  varRIy_se = numeric(),
+  covRI     = numeric(),
+
+  # Fit measures
+  chisq  = numeric(),
+  df     = numeric(),
+  pvalue = numeric(),
+  cfi    = numeric(),
+  tli    = numeric(),
+  rmsea  = numeric(),
+  srmr   = numeric(),
+  aic    = numeric(),
+  bic    = numeric(),
+
+  stringsAsFactors = FALSE
+)
+
+start_time_total <- Sys.time()
+
+for (rep in 1:replications) {
+
+  # Generate dataset of max size needed, then iteratively fit models on subsets.
+  data <- DGM(N = N,
+              timepoints = max(timepoints),
+              seed = seed + rep)
+
+  # loop through timepoint conditions to fit models
+  for (i in timepoints) {
+
+    # Subset columns to the first i timepoints for x and y
+    data_i <- data$data[, c(paste0("x", 1:i), paste0("y", 1:i))]
+
+    # --- FIT RI-CLPM ---
+    start_time_riclpm <- Sys.time()
+
+    fit_riclpm <- tryCatch({
+      sem(generate_riclpm(T = i), data = data_i)
+    }, error = function(e) NULL)
+
+    if (!is.null(fit_riclpm)) {
+      converged_riclpm  <- lavInspect(fit_riclpm, "converged")
+      post_check_riclpm <- tryCatch(lavInspect(fit_riclpm, "post.check"),
+                                    error = function(e) FALSE)
+      n_iter_riclpm     <- tryCatch(fit_riclpm@optim$iterations,
+                                    error = function(e) NA)
+
+      coef_riclpm <- if (converged_riclpm) coef(fit_riclpm) else NULL
+      se_riclpm   <- if (converged_riclpm) {
+        tryCatch(sqrt(diag(vcov(fit_riclpm))), error = function(e) NULL)
+      } else NULL
+
+      fit_meas_riclpm <- tryCatch(
+        fitMeasures(fit_riclpm, c("chisq", "df", "pvalue",
+                                  "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+        error = function(e) rep(NA, 9)
+      )
+    } else {
+      converged_riclpm  <- FALSE
+      post_check_riclpm <- FALSE
+      n_iter_riclpm     <- NA
+      coef_riclpm       <- NULL
+      se_riclpm         <- NULL
+      fit_meas_riclpm   <- rep(NA, 9)
+    }
+
+    bx_riclpm    <- if (!is.null(coef_riclpm) && "bx"     %in% names(coef_riclpm)) coef_riclpm["bx"]     else NA
+    by_riclpm    <- if (!is.null(coef_riclpm) && "by"     %in% names(coef_riclpm)) coef_riclpm["by"]     else NA
+    ax_riclpm    <- if (!is.null(coef_riclpm) && "ax"     %in% names(coef_riclpm)) coef_riclpm["ax"]     else NA
+    ay_riclpm    <- if (!is.null(coef_riclpm) && "ay"     %in% names(coef_riclpm)) coef_riclpm["ay"]     else NA
+    bx_se_riclpm <- if (!is.null(se_riclpm)   && "bx"     %in% names(se_riclpm))   se_riclpm["bx"]       else NA
+    by_se_riclpm <- if (!is.null(se_riclpm)   && "by"     %in% names(se_riclpm))   se_riclpm["by"]       else NA
+    ax_se_riclpm <- if (!is.null(se_riclpm)   && "ax"     %in% names(se_riclpm))   se_riclpm["ax"]       else NA
+    ay_se_riclpm <- if (!is.null(se_riclpm)   && "ay"     %in% names(se_riclpm))   se_riclpm["ay"]       else NA
+    varRIx_riclpm    <- if (!is.null(coef_riclpm) && "varRIx" %in% names(coef_riclpm)) coef_riclpm["varRIx"] else NA
+    varRIy_riclpm    <- if (!is.null(coef_riclpm) && "varRIy" %in% names(coef_riclpm)) coef_riclpm["varRIy"] else NA
+    varRIx_se_riclpm <- if (!is.null(se_riclpm)   && "varRIx" %in% names(se_riclpm))   se_riclpm["varRIx"]   else NA
+    varRIy_se_riclpm <- if (!is.null(se_riclpm)   && "varRIy" %in% names(se_riclpm))   se_riclpm["varRIy"]   else NA
+    covRI_riclpm     <- if (!is.null(coef_riclpm) && "covRI"  %in% names(coef_riclpm)) coef_riclpm["covRI"]  else NA
+
+    replication_results <- rbind(replication_results, data.frame(
+      replication  = rep,
+      timepoints   = i,
+      model_type   = "RI-CLPM",
+      convergence  = converged_riclpm,
+      post_check   = post_check_riclpm,
+      n_iterations = n_iter_riclpm,
+      bx      = bx_riclpm,
+      by      = by_riclpm,
+      bx_se   = bx_se_riclpm,
+      by_se   = by_se_riclpm,
+      bias_bx = bx_riclpm - true_bx,
+      bias_by = by_riclpm - true_by,
+      ax      = ax_riclpm,
+      ay      = ay_riclpm,
+      ax_se   = ax_se_riclpm,
+      ay_se   = ay_se_riclpm,
+      varRIx    = varRIx_riclpm,
+      varRIy    = varRIy_riclpm,
+      varRIx_se = varRIx_se_riclpm,
+      varRIy_se = varRIy_se_riclpm,
+      covRI     = covRI_riclpm,
+      chisq  = fit_meas_riclpm[1],
+      df     = fit_meas_riclpm[2],
+      pvalue = fit_meas_riclpm[3],
+      cfi    = fit_meas_riclpm[4],
+      tli    = fit_meas_riclpm[5],
+      rmsea  = fit_meas_riclpm[6],
+      srmr   = fit_meas_riclpm[7],
+      aic    = fit_meas_riclpm[8],
+      bic    = fit_meas_riclpm[9],
+      stringsAsFactors = FALSE
+    ))
+
+    if (!is.null(fit_riclpm)) rm(fit_riclpm)
+
+    # --- FIT SRI-CLPM ---
+    start_time_sriclpm <- Sys.time()
+
+    fit_sriclpm <- tryCatch({
+      sem(generate_segmented_riclpm(T = i, timespan = 3), data = data_i)
+    }, error = function(e) NULL)
+
+    if (!is.null(fit_sriclpm)) {
+      converged_sriclpm  <- lavInspect(fit_sriclpm, "converged")
+      post_check_sriclpm <- tryCatch(lavInspect(fit_sriclpm, "post.check"),
+                                     error = function(e) FALSE)
+      n_iter_sriclpm     <- tryCatch(fit_sriclpm@optim$iterations,
+                                     error = function(e) NA)
+
+      coef_sriclpm <- if (converged_sriclpm) coef(fit_sriclpm) else NULL
+      se_sriclpm   <- if (converged_sriclpm) {
+        tryCatch(sqrt(diag(vcov(fit_sriclpm))), error = function(e) NULL)
+      } else NULL
+
+      fit_meas_sriclpm <- tryCatch(
+        fitMeasures(fit_sriclpm, c("chisq", "df", "pvalue",
+                                   "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+        error = function(e) rep(NA, 9)
+      )
+    } else {
+      converged_sriclpm  <- FALSE
+      post_check_sriclpm <- FALSE
+      n_iter_sriclpm     <- NA
+      coef_sriclpm       <- NULL
+      se_sriclpm         <- NULL
+      fit_meas_sriclpm   <- rep(NA, 9)
+    }
+
+    bx_sriclpm    <- if (!is.null(coef_sriclpm) && "bx"     %in% names(coef_sriclpm)) coef_sriclpm["bx"]     else NA
+    by_sriclpm    <- if (!is.null(coef_sriclpm) && "by"     %in% names(coef_sriclpm)) coef_sriclpm["by"]     else NA
+    ax_sriclpm    <- if (!is.null(coef_sriclpm) && "ax"     %in% names(coef_sriclpm)) coef_sriclpm["ax"]     else NA
+    ay_sriclpm    <- if (!is.null(coef_sriclpm) && "ay"     %in% names(coef_sriclpm)) coef_sriclpm["ay"]     else NA
+    bx_se_sriclpm <- if (!is.null(se_sriclpm)   && "bx"     %in% names(se_sriclpm))   se_sriclpm["bx"]       else NA
+    by_se_sriclpm <- if (!is.null(se_sriclpm)   && "by"     %in% names(se_sriclpm))   se_sriclpm["by"]       else NA
+    ax_se_sriclpm <- if (!is.null(se_sriclpm)   && "ax"     %in% names(se_sriclpm))   se_sriclpm["ax"]       else NA
+    ay_se_sriclpm <- if (!is.null(se_sriclpm)   && "ay"     %in% names(se_sriclpm))   se_sriclpm["ay"]       else NA
+    varRIx_sriclpm    <- if (!is.null(coef_sriclpm) && "varRIx" %in% names(coef_sriclpm)) coef_sriclpm["varRIx"] else NA
+    varRIy_sriclpm    <- if (!is.null(coef_sriclpm) && "varRIy" %in% names(coef_sriclpm)) coef_sriclpm["varRIy"] else NA
+    varRIx_se_sriclpm <- if (!is.null(se_sriclpm)   && "varRIx" %in% names(se_sriclpm))   se_sriclpm["varRIx"]   else NA
+    varRIy_se_sriclpm <- if (!is.null(se_sriclpm)   && "varRIy" %in% names(se_sriclpm))   se_sriclpm["varRIy"]   else NA
+    covRI_sriclpm     <- if (!is.null(coef_sriclpm) && "covRI"  %in% names(coef_sriclpm)) coef_sriclpm["covRI"]  else NA
+
+    replication_results <- rbind(replication_results, data.frame(
+      replication  = rep,
+      timepoints   = i,
+      model_type   = "SRI-CLPM",
+      convergence  = converged_sriclpm,
+      post_check   = post_check_sriclpm,
+      n_iterations = n_iter_sriclpm,
+      bx      = bx_sriclpm,
+      by      = by_sriclpm,
+      bx_se   = bx_se_sriclpm,
+      by_se   = by_se_sriclpm,
+      bias_bx = bx_sriclpm - true_bx,
+      bias_by = by_sriclpm - true_by,
+      ax      = ax_sriclpm,
+      ay      = ay_sriclpm,
+      ax_se   = ax_se_sriclpm,
+      ay_se   = ay_se_sriclpm,
+      varRIx    = varRIx_sriclpm,
+      varRIy    = varRIy_sriclpm,
+      varRIx_se = varRIx_se_sriclpm,
+      varRIy_se = varRIy_se_sriclpm,
+      covRI     = covRI_sriclpm,
+      chisq  = fit_meas_sriclpm[1],
+      df     = fit_meas_sriclpm[2],
+      pvalue = fit_meas_sriclpm[3],
+      cfi    = fit_meas_sriclpm[4],
+      tli    = fit_meas_sriclpm[5],
+      rmsea  = fit_meas_sriclpm[6],
+      srmr   = fit_meas_sriclpm[7],
+      aic    = fit_meas_sriclpm[8],
+      bic    = fit_meas_sriclpm[9],
+      stringsAsFactors = FALSE
+    ))
+
+    if (!is.null(fit_sriclpm)) rm(fit_sriclpm)
+
+  }
+
+  rm(data)
+  if (rep %% 100 == 0) gc(verbose = FALSE)
+
+  if (!(rep / replications * 100 %% 5)) {
+    cat("Simulating... ", rep / replications * 100, " %\n")
+  }
+
+}
+
+# Save results
+data_struct$results <- replication_results
+data_struct$simulation_parameters <- list(
+  replications = replications,
+  N            = N,
+  timepoints   = timepoints,
+  timespan     = 3,
+  seed         = seed,
+  true_bx      = true_bx,
+  true_by      = true_by
+)
+
+filename <- save_clear(data_struct, filename_prefix = "sim_T_effect")
+
+total_time <- difftime(Sys.time(), start_time_total, units = "mins")
+cat("\n=== Simulation Completed ===\n")
+cat("Total time:", round(total_time, 2), "minutes\n")
+cat("Results saved to:", filename, "\n")
 ```
 
 ### Simulation 3: 
+
+Wat als er ook time-invariant confounding is? Wat als we een globaal RI toevoegen?
+
+set DGM params, combined confounding,
+
+Een plot zou handig zijn om te laten zien dat het model hetzelfde functioneert. Het toegevoegd nut van de globale RI is dan moeilijk vast te stellen, daarvoor zou je moeten kunnen laten zien dat de scheiding tussen time-varying en time-invariant confounding goed werkt. Is dit buiten de scope van de thesis? Hoe zou ik dit willen laten zien als ik alle tijd van de wereld had?
+
+Een optie zou zijn om beide specificaties van de SRI-CLPM te fitten op twee verschillende DGM's, met in beide gevallen time-varying confounding, maar in het ene geval ook time-invariant confounding.
+
+In ieder geval is het nuttig om te kunnen laten zien dat de SRI-CLPM met globaal RI ongeveer dezelfde eigenschappen heeft als de SRI-CLPM zonder. Het is alleen niet nuttig om twee keer hetzelfde te plotten / simuleren in verschillende plotjes, dus dat moet vermeden worden.
+
+Een betere optie is om de performance van de SRI-CLPM te plotten en te zoeken naar een manier om zowel de globale RI varianties en cross-lag bias in hetzelfde plaatje te krijgen.
 
 ```{r}
 
