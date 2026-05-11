@@ -53,76 +53,253 @@ irow <- function( rowM ){
 2x2 matrix with DGM params nconf(4,6) and ax(.2,.3). Illustrate role of "temporal stability" in Illusory Traits. Illustrate direct relationship between illusory random intercept variance and less biased estimation of cross-lagged params. Population matrices.
 
 ```{r}
-autoreg <- c(.2,.3)
-nconf <- c(4,6)
+# conditions
+autoreg <- c(.2, .3)
+nconf <- c(4, 6)
 
 # general settings
-timepoints <- 30
+timepoints <- 75
 seed <- 42
-filename_prefix <- "Simulation1" # sets name for saved output
-data_struct <- create_metadata() # returns empty results with metadata
+filename_prefix <- "Simulation1"
 
-for (i in autoreg){
-  for (j in nconf){
+# create empty data structure
+data_struct <- create_metadata()
 
-    # empty object per condition results
+# loop through conditions
+for (i in autoreg) {
+  for (j in nconf) {
+
+    # Initialise per condition results
     condition_results <- data.frame(
-        autoreg = integer(),
-        timepoints_used = integer(),
-        iteration = integer(),
-        varRIx = numeric(),
-        varRIy = numeric(),
-        convergence = logical(),
-        fit_measures = I(list()),  
-        coefficients = I(list()),  
-        processing_time = numeric()
-      )
-    
+      autoreg         = numeric(),
+      nconf           = integer(),
+      timepoints_used = integer(),
+      iteration       = integer(),
+      varRIx          = numeric(),
+      varRIy          = numeric(),
+      convergence     = logical(),
+      fit_measures    = I(list()),
+      coefficients    = I(list()),
+      processing_time = numeric()
+    )
+
     # generate data
-    data <- DGM(autocorr_effects = i,
-                n_x_confounders = j,
-                n_y_confounders = j,
-                timepoints = timepoints,
-                seed = seed)
-    
+    data <- DGM(autocorr_effects  = i,
+                n_x_confounders   = j,
+                n_y_confounders   = j,
+                timepoints        = timepoints,
+                seed              = seed)
+
     # fit models on multiples of 3
-    for (x in seq(3,timepoints,3)){
+    for (x in seq(3, timepoints, 3)) {
       start_time <- Sys.time()
-      
-      # fit model
-      fit <- sem(generate_riclpm(x), data$data)
-      
-      converged <- lavInspect(fit, "converged")
+
+      fit <- sem(generate_riclpm(x), data$data) # fit model
+
+      converged    <- lavInspect(fit, "converged") # check convergence
       fit_measures <- fitMeasures(fit, c("chisq", "df", "pvalue", "cfi", "tli",
-                                       "rmsea", "srmr"))
-      
-      coeff <- if(converged){coef(fit)}else{NULL}
-      
+                                         "rmsea", "srmr"))
+      coeff <- if (converged) coef(fit) else NULL
+
+      # fill per condition results
       condition_results <- rbind(condition_results, data.frame(
-        autoreg = i,  
+        autoreg         = i,
+        nconf           = j,
         timepoints_used = x,
-        iteration = x/3,
-        varRIx = if(converged) coef(fit)["varRIx"] else NA,
-        varRIy = if(converged) coef(fit)["varRIy"] else NA,
-        convergence = converged,
-        fit_measures = I(list(fit_measures)),
-        coefficients = I(list(coeff)),
-        processing_time = as.numeric(difftime(Sys.time(), start_time, 
+        iteration       = x / 3,
+        varRIx          = if (converged) coef(fit)["varRIx"] else NA,
+        varRIy          = if (converged) coef(fit)["varRIy"] else NA,
+        convergence     = converged,
+        fit_measures    = I(list(fit_measures)),
+        coefficients    = I(list(coeff)),
+        processing_time = as.numeric(difftime(Sys.time(), start_time,
                                               units = "secs"))
       ))
-      rm(fit) #remove fit object so it doesnt clog up memory
+
+      # aggressively remove fit to declutter memory
+      rm(fit)
     }
+
+    # add condition results to overall
     data_struct$results <- rbind(data_struct$results, condition_results)
-    
+
+    # save data to file
     filename <- save_clear(data_struct, filename_prefix)
-    
-    cat("Completed Sim with autoregressive: ", i, " and nconf: ", j, "\n")
-    
+
+    # message
+    cat("Completed sim with autoregressive:", i, "and nconf:", j, "\n")
+
     rm(data)
     gc()
-    
   }
 }
+```
+
+#### Plotting
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggh4x) # Required for individual facet scaling
+
+sim     <- Simulation1_20260311_212309 # load in data
+results <- sim$results
+
+results <- results %>%
+  # unlist conditions
+  mutate(
+    autoreg = unlist(autoreg),
+    nconf   = unlist(nconf)
+  ) %>%
+  # 
+  mutate(
+    bx = sapply(coefficients, function(c)
+      if (!is.null(c) && "bx" %in% names(c)) c["bx"] else NA_real_)
+  ) %>%
+  filter(convergence == TRUE)
+
+# true parameter value
+true_beta <- 0.1
+
+# One row per condition x timepoint: compute bias and keep varRIx
+plot_data <- results %>%
+  transmute(
+    autoreg,
+    nconf,
+    timepoints_used,
+    bias_bx = bx - true_beta,
+    varRIx
+  ) %>%
+  pivot_longer(
+    cols      = c(bias_bx, varRIx),
+    names_to  = "outcome",
+    values_to = "value"
+  ) %>%
+  mutate(
+    outcome = factor(outcome,
+                     levels = c("bias_bx", "varRIx"),
+                     labels = c("Bias in bx", "Var(RI_x) estimate")),
+    facet_row = factor(paste0("\u03b1 = ", autoreg)),
+    facet_col = factor(paste0("Confounders = ", nconf),
+                       levels = paste0("Confounders = ", sort(unique(nconf))))
+  )
+
+outcome_colours   <- c("Bias in bx"         = "#2166AC",
+                        "Var(RI_x) estimate" = "#B2182B")
+outcome_linetypes <- c("Bias in bx"         = "solid",
+                        "Var(RI_x) estimate" = "dashed")
+
+# ==============================================================================
+# THEME
+# ==============================================================================
+
+theme_apa <- theme_classic(base_size = 11, base_family = "sans") +
+  theme(
+    axis.title         = element_text(size = 10),
+    axis.text          = element_text(size = 9),
+    axis.line          = element_line(colour = "black", linewidth = 0.4),
+    strip.background   = element_blank(),
+    strip.text         = element_text(face = "bold", size = 9),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.text        = element_text(size = 9),
+    legend.key.width   = unit(1.5, "lines"),
+    legend.key.size    = unit(0.5, "lines"),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.3),
+    panel.grid.major.x = element_blank(),
+    plot.margin        = margin(8, 10, 6, 8),
+    plot.caption       = element_text(size = 8, hjust = 0, margin = margin(t = 6))
+  )
+
+# ==============================================================================
+# PLOT
+# ==============================================================================
+
+# 1. Update the data processing with the new labels
+plot_data <- results %>%
+  transmute(
+    autoreg,
+    nconf,
+    timepoints_used,
+    bias_bx = bx - true_beta,
+    varRIx
+  ) %>%
+  pivot_longer(
+    cols      = c(bias_bx, varRIx),
+    names_to  = "outcome",
+    values_to = "value"
+  ) %>%
+  mutate(
+    outcome = factor(outcome,
+                     levels = c("bias_bx", "varRIx"),
+                     labels = c("Bias in cross-lagged parameter", 
+                                "Random intercept variance")),
+    facet_row = factor(paste0("\u03b1 = ", autoreg)),
+    facet_col = factor(paste0("Confounders = ", nconf),
+                       levels = paste0("Confounders = ", sort(unique(nconf))))
+  )
+
+outcome_colours <- c("Bias in cross-lagged parameter" = "#2166AC",
+                     "Random intercept variance"      = "#B2182B")
+outcome_linetypes <- c("Bias in cross-lagged parameter" = "solid",
+                       "Random intercept variance"      = "dashed")
+
+# 2. Define the emphasis data and scales
+emphasis_box <- data.frame(facet_row = "α = 0.3", facet_col = "Confounders = 6")
+shared_y_scale  <- scale_y_continuous(limits = c(0, 0.2)) 
+special_y_scale <- scale_y_continuous(limits = c(0, 1.5))
+
+# ==============================================================================
+# PLOT
+# ==============================================================================
+
+p <- ggplot(plot_data,
+            aes(x        = timepoints_used,
+                y        = value,
+                colour   = outcome,
+                linetype = outcome)) +
+  
+  # The Callout Block (Background shading for bottom-right)
+  geom_rect(data = emphasis_box, 
+            aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            fill = "grey80", alpha = 0.4, inherit.aes = FALSE) +
+
+  geom_hline(yintercept = 0, linetype = "dotted",
+             colour = "black", linewidth = 0.4) +
+  
+  geom_line(linewidth = 0.75, na.rm = TRUE) +
+  
+  facet_wrap(~ facet_row + facet_col, nrow = 2, scales = "free_y") + 
+  
+  facetted_pos_scales(
+    y = list(
+      facet_row == "α = 0.2" ~ shared_y_scale, 
+      facet_col == "Confounders = 4" & facet_row == "α = 0.3" ~ shared_y_scale,
+      facet_col == "Confounders = 6" & facet_row == "α = 0.3" ~ special_y_scale
+    )
+  ) +
+  
+  scale_colour_manual(values = outcome_colours) +
+  scale_linetype_manual(values = outcome_linetypes) +
+  scale_x_continuous(breaks = seq(0, 75, 15),
+                     expand = expansion(mult = c(0.01, 0.02))) +
+  
+  theme_apa +
+  theme(
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    legend.key.width = unit(2.5, "lines") # Slightly wider for longer labels
+  ) +
+  
+  labs(
+    x       = "Number of timepoints",
+    y       = "Value",
+    caption = "Note. The shaded panel indicates a different Y-axis scale (0 to 1.5) compared to other panels (0 to 0.2).\n α = autoregressive effects of all variables, confounders = number of confounders on each variable of interest.\n "
+  )
+
+p
+
+# ggsave("fig_sim1_2x2.png", p, width = 6.5, height = 5.5, dpi = 300)
 ```
 
 ### Simulation 2: the SRI-CLPM
@@ -131,263 +308,271 @@ Demonstrate usability of SRI-CLPM, so realistic sample sizes, set default DGM pa
 
 Plot idea, show 5 timepoints and plot the cross-lagged parameters with boxplots, with a line for the true value.
 
-Rough estimated runtime 9 hours.
+Total time it took is 276 mins (4.6 hours)
 
 ```{r}
-timepoints <- seq(6, 30, 6)
-replications <- 2000
-N <- 200
-seed <- 42
+library(lavaan)
+library(parallel)
+
+source("functionSource.R")
+
+# ==============================================================================
+# PARAMETERS
+# ==============================================================================
+
+timepoints   <- seq(6, 30, 6)
+replications <- 3000
+N_conditions <- c(250, 500)
+timespans    <- c(2, 3)
+seed         <- 42
 
 true_bx <- 0.1
 true_by <- 0.1
 
-data_struct <- create_metadata()
+# ==============================================================================
+# MODEL SPEC GENERATION
+# CLPM and RI-CLPM: one spec per timepoint (no timespan dimension)
+# SRI-CLPM variants: one spec per timepoint x timespan
+# ==============================================================================
 
-replication_results <- data.frame(
-  replication  = integer(),
-  timepoints   = integer(),
-  model_type   = character(),
-
-  # Convergence and diagnostics
-  convergence  = logical(),
-  post_check   = logical(),
-  n_iterations = integer(),
-
-  # Cross-lagged parameters
-  bx    = numeric(),
-  by    = numeric(),
-  bx_se = numeric(),
-  by_se = numeric(),
-  bias_bx = numeric(),
-  bias_by = numeric(),
-
-  # Autoregressive parameters
-  ax    = numeric(),
-  ay    = numeric(),
-  ax_se = numeric(),
-  ay_se = numeric(),
-
-  # Random intercept variances
-  varRIx    = numeric(),
-  varRIy    = numeric(),
-  varRIx_se = numeric(),
-  varRIy_se = numeric(),
-  covRI     = numeric(),
-
-  # Fit measures
-  chisq  = numeric(),
-  df     = numeric(),
-  pvalue = numeric(),
-  cfi    = numeric(),
-  tli    = numeric(),
-  rmsea  = numeric(),
-  srmr   = numeric(),
-  aic    = numeric(),
-  bic    = numeric(),
-
-  stringsAsFactors = FALSE
+modelSpecs_clpm <- setNames(
+  lapply(timepoints, function(i) generate_clpm(T = i)),
+  as.character(timepoints)
 )
 
-start_time_total <- Sys.time()
+modelSpecs_riclpm <- setNames(
+  lapply(timepoints, function(i) generate_riclpm(T = i)),
+  as.character(timepoints)
+)
 
-for (rep in 1:replications) {
+# Named list: modelSpecs_sriclpm[["ts2"]][["6"]], modelSpecs_sriclpm[["ts3"]][["12"]], etc.
+modelSpecs_sriclpm <- setNames(
+  lapply(timespans, function(ts)
+    setNames(
+      lapply(timepoints, function(i)
+        generate_segmented_riclpm(T = i, timespan = ts, across_seg_cov = "toeplitz")),
+      as.character(timepoints)
+    )
+  ),
+  paste0("ts", timespans)
+)
 
-  # Generate dataset of max size needed, then iteratively fit models on subsets.
-  data <- DGM(N = N,
-              timepoints = max(timepoints),
-              seed = seed + rep)
+modelSpecs_sriclpm_free <- setNames(
+  lapply(timespans, function(ts)
+    setNames(
+      lapply(timepoints, function(i)
+        generate_segmented_riclpm(T = i, timespan = ts, across_seg_cov = "free")),
+      as.character(timepoints)
+    )
+  ),
+  paste0("ts", timespans)
+)
 
-  # loop through timepoint conditions to fit models
+# ==============================================================================
+# HELPER: fit one model, return a single-row data frame
+# ==============================================================================
+
+fit_and_extract <- function(model_spec, model_label, tp, ts, N, data_df,
+                            rep_id, true_bx, true_by) {
+
+  fit <- tryCatch(sem(model_spec, data = data_df), error = function(e) NULL)
+
+  if (!is.null(fit)) {
+    converged  <- lavInspect(fit, "converged")
+    post_check <- tryCatch(lavInspect(fit, "post.check"), error = function(e) FALSE)
+    n_iter     <- tryCatch(fit@optim$iterations,           error = function(e) NA)
+
+    coef_vec <- if (converged) coef(fit) else NULL
+    se_vec   <- if (converged) tryCatch(sqrt(diag(vcov(fit))),
+                                        error = function(e) NULL) else NULL
+    fit_meas <- tryCatch(
+      fitMeasures(fit, c("chisq", "df", "pvalue",
+                         "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+      error = function(e) rep(NA, 9)
+    )
+    rm(fit)
+  } else {
+    converged  <- FALSE
+    post_check <- FALSE
+    n_iter     <- NA
+    coef_vec   <- NULL
+    se_vec     <- NULL
+    fit_meas   <- rep(NA, 9)
+  }
+
+  g <- function(vec, nm) {
+    if (!is.null(vec) && nm %in% names(vec)) vec[nm] else NA_real_
+  }
+
+  data.frame(
+    replication  = rep_id,
+    N            = N,
+    timepoints   = tp,
+    timespan     = ts,       # NA for CLPM and RI-CLPM
+    model_type   = model_label,
+
+    convergence  = converged,
+    post_check   = post_check,
+    n_iterations = n_iter,
+
+    bx      = g(coef_vec, "bx"),
+    by      = g(coef_vec, "by"),
+    bx_se   = g(se_vec,   "bx"),
+    by_se   = g(se_vec,   "by"),
+    bias_bx = g(coef_vec, "bx") - true_bx,
+    bias_by = g(coef_vec, "by") - true_by,
+
+    ax    = g(coef_vec, "ax"),
+    ay    = g(coef_vec, "ay"),
+    ax_se = g(se_vec,   "ax"),
+    ay_se = g(se_vec,   "ay"),
+
+    varRIx    = g(coef_vec, "varRIx"),
+    varRIy    = g(coef_vec, "varRIy"),
+    varRIx_se = g(se_vec,   "varRIx"),
+    varRIy_se = g(se_vec,   "varRIy"),
+    covRI     = g(coef_vec, "covRI"),
+    covRI_se  = g(se_vec,   "covRI"),
+
+    chisq  = fit_meas[1],
+    df     = fit_meas[2],
+    pvalue = fit_meas[3],
+    cfi    = fit_meas[4],
+    tli    = fit_meas[5],
+    rmsea  = fit_meas[6],
+    srmr   = fit_meas[7],
+    aic    = fit_meas[8],
+    bic    = fit_meas[9],
+
+    stringsAsFactors = FALSE,
+    row.names        = NULL
+  )
+}
+
+# ==============================================================================
+# WORKER: one full replication (all timepoints x timespans x models) for a given N
+# ==============================================================================
+
+run_replication <- function(rep_id, timepoints, timespans, seed, N,
+                            true_bx, true_by,
+                            modelSpecs_clpm, modelSpecs_riclpm,
+                            modelSpecs_sriclpm, modelSpecs_sriclpm_free) {
+
+  data <- DGM(N = N, timepoints = max(timepoints), seed = seed + rep_id)
+
+  # Rows per rep: per timepoint — CLPM + RI-CLPM (once) + 2 timespans x 2 SRI variants
+  n_rows_per_rep <- length(timepoints) * (2L + length(timespans) * 2L)
+  rows <- vector("list", n_rows_per_rep)
+  k    <- 1L
+
   for (i in timepoints) {
-
-    # Subset columns to the first i timepoints for x and y
+    tp_key <- as.character(i)
     data_i <- data$data[, c(paste0("x", 1:i), paste0("y", 1:i))]
 
-    # --- FIT RI-CLPM ---
-    start_time_riclpm <- Sys.time()
+    # CLPM and RI-CLPM — fitted once per timepoint, timespan = NA
+    rows[[k]] <- fit_and_extract(modelSpecs_clpm[[tp_key]],
+                                 "CLPM", i, NA_integer_, N,
+                                 data_i, rep_id, true_bx, true_by)
+    k <- k + 1L
 
-    fit_riclpm <- tryCatch({
-      sem(generate_riclpm(T = i), data = data_i)
-    }, error = function(e) NULL)
+    rows[[k]] <- fit_and_extract(modelSpecs_riclpm[[tp_key]],
+                                 "RI-CLPM", i, NA_integer_, N,
+                                 data_i, rep_id, true_bx, true_by)
+    k <- k + 1L
 
-    if (!is.null(fit_riclpm)) {
-      converged_riclpm  <- lavInspect(fit_riclpm, "converged")
-      post_check_riclpm <- tryCatch(lavInspect(fit_riclpm, "post.check"),
-                                    error = function(e) FALSE)
-      n_iter_riclpm     <- tryCatch(fit_riclpm@optim$iterations,
-                                    error = function(e) NA)
+    # SRI-CLPM variants — fitted once per timespan
+    for (ts in timespans) {
+      ts_key <- paste0("ts", ts)
 
-      coef_riclpm <- if (converged_riclpm) coef(fit_riclpm) else NULL
-      se_riclpm   <- if (converged_riclpm) {
-        tryCatch(sqrt(diag(vcov(fit_riclpm))), error = function(e) NULL)
-      } else NULL
+      rows[[k]] <- fit_and_extract(modelSpecs_sriclpm[[ts_key]][[tp_key]],
+                                   "SRI-CLPM", i, ts, N,
+                                   data_i, rep_id, true_bx, true_by)
+      k <- k + 1L
 
-      fit_meas_riclpm <- tryCatch(
-        fitMeasures(fit_riclpm, c("chisq", "df", "pvalue",
-                                  "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
-        error = function(e) rep(NA, 9)
-      )
-    } else {
-      converged_riclpm  <- FALSE
-      post_check_riclpm <- FALSE
-      n_iter_riclpm     <- NA
-      coef_riclpm       <- NULL
-      se_riclpm         <- NULL
-      fit_meas_riclpm   <- rep(NA, 9)
+      rows[[k]] <- fit_and_extract(modelSpecs_sriclpm_free[[ts_key]][[tp_key]],
+                                   "SRI-CLPM-free", i, ts, N,
+                                   data_i, rep_id, true_bx, true_by)
+      k <- k + 1L
     }
 
-    bx_riclpm    <- if (!is.null(coef_riclpm) && "bx"     %in% names(coef_riclpm)) coef_riclpm["bx"]     else NA
-    by_riclpm    <- if (!is.null(coef_riclpm) && "by"     %in% names(coef_riclpm)) coef_riclpm["by"]     else NA
-    ax_riclpm    <- if (!is.null(coef_riclpm) && "ax"     %in% names(coef_riclpm)) coef_riclpm["ax"]     else NA
-    ay_riclpm    <- if (!is.null(coef_riclpm) && "ay"     %in% names(coef_riclpm)) coef_riclpm["ay"]     else NA
-    bx_se_riclpm <- if (!is.null(se_riclpm)   && "bx"     %in% names(se_riclpm))   se_riclpm["bx"]       else NA
-    by_se_riclpm <- if (!is.null(se_riclpm)   && "by"     %in% names(se_riclpm))   se_riclpm["by"]       else NA
-    ax_se_riclpm <- if (!is.null(se_riclpm)   && "ax"     %in% names(se_riclpm))   se_riclpm["ax"]       else NA
-    ay_se_riclpm <- if (!is.null(se_riclpm)   && "ay"     %in% names(se_riclpm))   se_riclpm["ay"]       else NA
-    varRIx_riclpm    <- if (!is.null(coef_riclpm) && "varRIx" %in% names(coef_riclpm)) coef_riclpm["varRIx"] else NA
-    varRIy_riclpm    <- if (!is.null(coef_riclpm) && "varRIy" %in% names(coef_riclpm)) coef_riclpm["varRIy"] else NA
-    varRIx_se_riclpm <- if (!is.null(se_riclpm)   && "varRIx" %in% names(se_riclpm))   se_riclpm["varRIx"]   else NA
-    varRIy_se_riclpm <- if (!is.null(se_riclpm)   && "varRIy" %in% names(se_riclpm))   se_riclpm["varRIy"]   else NA
-    covRI_riclpm     <- if (!is.null(coef_riclpm) && "covRI"  %in% names(coef_riclpm)) coef_riclpm["covRI"]  else NA
-
-    replication_results <- rbind(replication_results, data.frame(
-      replication  = rep,
-      timepoints   = i,
-      model_type   = "RI-CLPM",
-      convergence  = converged_riclpm,
-      post_check   = post_check_riclpm,
-      n_iterations = n_iter_riclpm,
-      bx      = bx_riclpm,
-      by      = by_riclpm,
-      bx_se   = bx_se_riclpm,
-      by_se   = by_se_riclpm,
-      bias_bx = bx_riclpm - true_bx,
-      bias_by = by_riclpm - true_by,
-      ax      = ax_riclpm,
-      ay      = ay_riclpm,
-      ax_se   = ax_se_riclpm,
-      ay_se   = ay_se_riclpm,
-      varRIx    = varRIx_riclpm,
-      varRIy    = varRIy_riclpm,
-      varRIx_se = varRIx_se_riclpm,
-      varRIy_se = varRIy_se_riclpm,
-      covRI     = covRI_riclpm,
-      chisq  = fit_meas_riclpm[1],
-      df     = fit_meas_riclpm[2],
-      pvalue = fit_meas_riclpm[3],
-      cfi    = fit_meas_riclpm[4],
-      tli    = fit_meas_riclpm[5],
-      rmsea  = fit_meas_riclpm[6],
-      srmr   = fit_meas_riclpm[7],
-      aic    = fit_meas_riclpm[8],
-      bic    = fit_meas_riclpm[9],
-      stringsAsFactors = FALSE
-    ))
-
-    if (!is.null(fit_riclpm)) rm(fit_riclpm)
-
-    # --- FIT SRI-CLPM ---
-    start_time_sriclpm <- Sys.time()
-
-    fit_sriclpm <- tryCatch({
-      sem(generate_segmented_riclpm(T = i, timespan = 3), data = data_i)
-    }, error = function(e) NULL)
-
-    if (!is.null(fit_sriclpm)) {
-      converged_sriclpm  <- lavInspect(fit_sriclpm, "converged")
-      post_check_sriclpm <- tryCatch(lavInspect(fit_sriclpm, "post.check"),
-                                     error = function(e) FALSE)
-      n_iter_sriclpm     <- tryCatch(fit_sriclpm@optim$iterations,
-                                     error = function(e) NA)
-
-      coef_sriclpm <- if (converged_sriclpm) coef(fit_sriclpm) else NULL
-      se_sriclpm   <- if (converged_sriclpm) {
-        tryCatch(sqrt(diag(vcov(fit_sriclpm))), error = function(e) NULL)
-      } else NULL
-
-      fit_meas_sriclpm <- tryCatch(
-        fitMeasures(fit_sriclpm, c("chisq", "df", "pvalue",
-                                   "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
-        error = function(e) rep(NA, 9)
-      )
-    } else {
-      converged_sriclpm  <- FALSE
-      post_check_sriclpm <- FALSE
-      n_iter_sriclpm     <- NA
-      coef_sriclpm       <- NULL
-      se_sriclpm         <- NULL
-      fit_meas_sriclpm   <- rep(NA, 9)
-    }
-
-    bx_sriclpm    <- if (!is.null(coef_sriclpm) && "bx"     %in% names(coef_sriclpm)) coef_sriclpm["bx"]     else NA
-    by_sriclpm    <- if (!is.null(coef_sriclpm) && "by"     %in% names(coef_sriclpm)) coef_sriclpm["by"]     else NA
-    ax_sriclpm    <- if (!is.null(coef_sriclpm) && "ax"     %in% names(coef_sriclpm)) coef_sriclpm["ax"]     else NA
-    ay_sriclpm    <- if (!is.null(coef_sriclpm) && "ay"     %in% names(coef_sriclpm)) coef_sriclpm["ay"]     else NA
-    bx_se_sriclpm <- if (!is.null(se_sriclpm)   && "bx"     %in% names(se_sriclpm))   se_sriclpm["bx"]       else NA
-    by_se_sriclpm <- if (!is.null(se_sriclpm)   && "by"     %in% names(se_sriclpm))   se_sriclpm["by"]       else NA
-    ax_se_sriclpm <- if (!is.null(se_sriclpm)   && "ax"     %in% names(se_sriclpm))   se_sriclpm["ax"]       else NA
-    ay_se_sriclpm <- if (!is.null(se_sriclpm)   && "ay"     %in% names(se_sriclpm))   se_sriclpm["ay"]       else NA
-    varRIx_sriclpm    <- if (!is.null(coef_sriclpm) && "varRIx" %in% names(coef_sriclpm)) coef_sriclpm["varRIx"] else NA
-    varRIy_sriclpm    <- if (!is.null(coef_sriclpm) && "varRIy" %in% names(coef_sriclpm)) coef_sriclpm["varRIy"] else NA
-    varRIx_se_sriclpm <- if (!is.null(se_sriclpm)   && "varRIx" %in% names(se_sriclpm))   se_sriclpm["varRIx"]   else NA
-    varRIy_se_sriclpm <- if (!is.null(se_sriclpm)   && "varRIy" %in% names(se_sriclpm))   se_sriclpm["varRIy"]   else NA
-    covRI_sriclpm     <- if (!is.null(coef_sriclpm) && "covRI"  %in% names(coef_sriclpm)) coef_sriclpm["covRI"]  else NA
-
-    replication_results <- rbind(replication_results, data.frame(
-      replication  = rep,
-      timepoints   = i,
-      model_type   = "SRI-CLPM",
-      convergence  = converged_sriclpm,
-      post_check   = post_check_sriclpm,
-      n_iterations = n_iter_sriclpm,
-      bx      = bx_sriclpm,
-      by      = by_sriclpm,
-      bx_se   = bx_se_sriclpm,
-      by_se   = by_se_sriclpm,
-      bias_bx = bx_sriclpm - true_bx,
-      bias_by = by_sriclpm - true_by,
-      ax      = ax_sriclpm,
-      ay      = ay_sriclpm,
-      ax_se   = ax_se_sriclpm,
-      ay_se   = ay_se_sriclpm,
-      varRIx    = varRIx_sriclpm,
-      varRIy    = varRIy_sriclpm,
-      varRIx_se = varRIx_se_sriclpm,
-      varRIy_se = varRIy_se_sriclpm,
-      covRI     = covRI_sriclpm,
-      chisq  = fit_meas_sriclpm[1],
-      df     = fit_meas_sriclpm[2],
-      pvalue = fit_meas_sriclpm[3],
-      cfi    = fit_meas_sriclpm[4],
-      tli    = fit_meas_sriclpm[5],
-      rmsea  = fit_meas_sriclpm[6],
-      srmr   = fit_meas_sriclpm[7],
-      aic    = fit_meas_sriclpm[8],
-      bic    = fit_meas_sriclpm[9],
-      stringsAsFactors = FALSE
-    ))
-
-    if (!is.null(fit_sriclpm)) rm(fit_sriclpm)
-
+    rm(data_i)
   }
 
   rm(data)
-  if (rep %% 100 == 0) gc(verbose = FALSE)
-
-  if (!(rep / replications * 100 %% 5)) {
-    cat("Simulating... ", rep / replications * 100, " %\n")
-  }
-
+  do.call(rbind, rows)
 }
 
-# Save results
+# ==============================================================================
+# PARALLELISATION SETUP
+# ==============================================================================
+
+n_cores <- max(1L, detectCores() - 1L)
+cat("Using", n_cores, "cores\n")
+
+cl <- makeCluster(n_cores)
+
+clusterExport(cl, varlist = c(
+  "DGM", "generate_clpm", "generate_riclpm", "generate_segmented_riclpm",
+  "fit_and_extract", "run_replication",
+  "timepoints", "timespans", "seed", "true_bx", "true_by",
+  "modelSpecs_clpm", "modelSpecs_riclpm",
+  "modelSpecs_sriclpm", "modelSpecs_sriclpm_free"
+))
+clusterEvalQ(cl, { library(lavaan); library(mvtnorm); source("functionSource.R") })
+
+# ==============================================================================
+# MAIN LOOP — one parLapply per N condition
+# ==============================================================================
+
+data_struct      <- create_metadata()
+start_time_total <- Sys.time()
+all_results      <- vector("list", length(N_conditions))
+
+for (ni in seq_along(N_conditions)) {
+  N <- N_conditions[ni]
+  cat("\n--- N =", N, "---\n")
+
+  clusterExport(cl, varlist = "N", envir = environment())
+
+  condition_results <- parLapply(
+    cl,
+    seq_len(replications),
+    fun                     = run_replication,
+    timepoints              = timepoints,
+    timespans               = timespans,
+    seed                    = seed,
+    N                       = N,
+    true_bx                 = true_bx,
+    true_by                 = true_by,
+    modelSpecs_clpm         = modelSpecs_clpm,
+    modelSpecs_riclpm       = modelSpecs_riclpm,
+    modelSpecs_sriclpm      = modelSpecs_sriclpm,
+    modelSpecs_sriclpm_free = modelSpecs_sriclpm_free
+  )
+
+  all_results[[ni]] <- do.call(rbind, condition_results)
+
+  elapsed <- round(difftime(Sys.time(), start_time_total, units = "mins"), 1)
+  cat("N =", N, "done |", elapsed, "min elapsed\n")
+  saveRDS(all_results[[ni]],
+          paste0("sim_T_effect_checkpoint_N", N, ".rds"))
+}
+
+stopCluster(cl)
+
+# ==============================================================================
+# ASSEMBLE & SAVE
+# ==============================================================================
+
+replication_results <- do.call(rbind, all_results)
+rownames(replication_results) <- NULL
+
 data_struct$results <- replication_results
 data_struct$simulation_parameters <- list(
   replications = replications,
-  N            = N,
+  N_conditions = N_conditions,
   timepoints   = timepoints,
-  timespan     = 3,
+  timespans    = timespans,
   seed         = seed,
   true_bx      = true_bx,
   true_by      = true_by
@@ -401,20 +586,1336 @@ cat("Total time:", round(total_time, 2), "minutes\n")
 cat("Results saved to:", filename, "\n")
 ```
 
-### Simulation 3: 
-
-Wat als er ook time-invariant confounding is? Wat als we een globaal RI toevoegen?
-
-set DGM params, combined confounding,
-
-Een plot zou handig zijn om te laten zien dat het model hetzelfde functioneert. Het toegevoegd nut van de globale RI is dan moeilijk vast te stellen, daarvoor zou je moeten kunnen laten zien dat de scheiding tussen time-varying en time-invariant confounding goed werkt. Is dit buiten de scope van de thesis? Hoe zou ik dit willen laten zien als ik alle tijd van de wereld had?
-
-Een optie zou zijn om beide specificaties van de SRI-CLPM te fitten op twee verschillende DGM's, met in beide gevallen time-varying confounding, maar in het ene geval ook time-invariant confounding.
-
-In ieder geval is het nuttig om te kunnen laten zien dat de SRI-CLPM met globaal RI ongeveer dezelfde eigenschappen heeft als de SRI-CLPM zonder. Het is alleen niet nuttig om twee keer hetzelfde te plotten / simuleren in verschillende plotjes, dus dat moet vermeden worden.
-
-Een betere optie is om de performance van de SRI-CLPM te plotten en te zoeken naar een manier om zowel de globale RI varianties en cross-lag bias in hetzelfde plaatje te krijgen.
+#### Plotting
 
 ```{r}
+library(ggplot2)
+library(dplyr)
 
+sim     <- sim_T_effect_20260329_135008
+results <- sim$results
+
+true_beta <- 0.1
+
+# Create a combined model label that folds timespan into the model name
+# for SRI variants, and leaves CLPM/RI-CLPM as-is
+plot_data <- results %>%
+  mutate(
+    model_label = case_when(
+      model_type %in% c("CLPM", "RI-CLPM") ~ model_type,
+      TRUE ~ paste0(model_type, " (SL=", timespan, ")")
+    ),
+    model_label = factor(model_label, levels = c(
+      "CLPM",
+      "RI-CLPM",
+      "SRI-CLPM (SL=2)",
+      "SRI-CLPM (SL=3)",
+      "SRI-CLPM-free (SL=2)",
+      "SRI-CLPM-free (SL=3)"
+    )),
+    N_label = factor(paste0("N = ", N),
+                     levels = paste0("N = ", sort(unique(N))))
+  )
+
+mean_lines <- plot_data %>%
+  group_by(model_label, timepoints, N_label) %>%
+  summarise(mean_bx = mean(bx, na.rm = TRUE), .groups = "drop")
+
+model_colours <- c(
+  "CLPM"                 = "#636363",
+  "RI-CLPM"              = "#2166AC",
+  "SRI-CLPM (SL=2)"      = "#B2182B",
+  "SRI-CLPM (SL=3)"      = "#F4A582",
+  "SRI-CLPM-free (SL=2)" = "#4DAC26",
+  "SRI-CLPM-free (SL=3)" = "#B8E186"
+)
+
+theme_apa <- theme_classic(base_size = 11, base_family = "sans") +
+  theme(
+    axis.title         = element_text(size = 10),
+    axis.text          = element_text(size = 9),
+    axis.line          = element_line(colour = "black", linewidth = 0.4),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.text        = element_text(size = 9),
+    legend.key.size    = unit(0.5, "lines"),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.3),
+    panel.grid.major.x = element_blank(),
+    plot.margin        = margin(8, 10, 6, 8),
+    plot.caption       = element_text(size = 8, hjust = 0, margin = margin(t = 6))
+  )
+
+# 6 models — evenly spaced offsets centred on each timepoint tick
+n_models     <- length(levels(plot_data$model_label))
+dodge_offset <- 2.0
+box_width    <- dodge_offset * 0.13
+
+offsets <- setNames(
+  seq(-dodge_offset / 2, dodge_offset / 2, length.out = n_models),
+  levels(plot_data$model_label)
+)
+
+plot_data <- plot_data %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+mean_lines <- mean_lines %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+# Build one plot per N condition
+make_plot <- function(n_val) {
+
+  pd <- filter(plot_data, N_label == paste0("N = ", n_val))
+  ml <- filter(mean_lines, N_label == paste0("N = ", n_val))
+
+  ggplot(mapping = aes(colour = model_label, fill = model_label)) +
+
+    geom_hline(yintercept = true_beta, linetype = "dashed",
+               colour = "black", linewidth = 0.45) +
+
+    geom_boxplot(
+      data          = pd,
+      aes(x = x_dodged, y = bx,
+          group = interaction(timepoints, model_label)),
+      width         = box_width,
+      alpha         = 0.3,
+      outlier.size  = 0.5,
+      outlier.alpha = 0.2,
+      linewidth     = 0.35
+    ) +
+
+#    geom_line(
+#      data      = ml,
+#      aes(x = x_dodged, y = mean_bx, group = model_label),
+#      linewidth = 0.75
+#    ) +
+
+    scale_colour_manual(values = model_colours, drop = FALSE) +
+    scale_fill_manual(values   = model_colours, drop = FALSE) +
+    scale_x_continuous(
+      breaks = unique(pd$timepoints),
+      labels = unique(pd$timepoints)
+    ) +
+    labs(
+      title   = paste0("N = ", n_val),
+      x       = "Number of timepoints",
+      y       = "Cross-lagged estimate",
+      caption = if (n_val == max(sim$simulation_parameters$N_conditions)) {
+        paste0(
+          "Note. Boxes show interquartile range across replications; ",
+          "Dashed reference line = true value. ",
+          "SL = Segment Length. ",
+          sim$simulation_parameters$replications, " replications per condition."
+        )
+      } else {
+        NULL
+      }
+    ) +
+    theme_apa +
+    guides(colour = guide_legend(nrow = 2),
+           fill   = guide_legend(nrow = 2))
+}
+
+p_list <- lapply(sort(unique(results$N)), make_plot)
+
+# Print separately
+for (p in p_list) print(p)
+
+# ggsave("fig_T_effect_N250.png", p_list[[1]], width = 8, height = 5, dpi = 300)
+# ggsave("fig_T_effect_N500.png", p_list[[2]], width = 8, height = 5, dpi = 300)
+# ggsave("fig_T_effect_bx.png", p, width = 9, height = 4.5, dpi = 300)
+
+# 1. Define True Values (Ensure true_ax and true_ay match your DGM settings)
+true_ax <- 0.2  # Default autocorr_effects in your DGM is 0.2
+true_ay <- 0.2
+
+# 2. Calculate Coverage
+coverage_summary <- results %>%
+  filter(convergence == TRUE) %>%
+  mutate(
+    # Cross-lagged coverage
+    bx_covered = (bx - 1.96 * bx_se) <= true_bx & (bx + 1.96 * bx_se) >= true_bx,
+    by_covered = (by - 1.96 * by_se) <= true_by & (by + 1.96 * by_se) >= true_by,
+    
+    # Autoregressive coverage
+    ax_covered = (ax - 1.96 * ax_se) <= true_ax & (ax + 1.96 * ax_se) >= true_ax,
+    ay_covered = (ay - 1.96 * ay_se) <= true_ay & (ay + 1.96 * ay_se) >= true_ay
+  ) %>%
+  group_by(model_type, N, timepoints, timespan) %>%
+  summarise(
+    n_valid = n(),
+    coverage_bx = mean(bx_covered, na.rm = TRUE),
+    coverage_by = mean(by_covered, na.rm = TRUE),
+    coverage_ax = mean(ax_covered, na.rm = TRUE),
+    coverage_ay = mean(ay_covered, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Filter for benchmarks and the specific SRI variant
+heatmap_comparison_data <- coverage_summary %>%
+  filter(
+    model_type == "CLPM" | 
+    model_type == "RI-CLPM" | 
+    (model_type == "SRI-CLPM" & timespan == 2)
+  ) %>%
+  pivot_longer(
+    cols = starts_with("coverage_"), 
+    names_to = "Parameter", 
+    values_to = "Rate"
+  ) %>%
+  mutate(
+    # Explicit Parameter Labels
+    Parameter_Label = case_when(
+      Parameter == "coverage_ax" ~ "Autoregressive (X→X)",
+      Parameter == "coverage_ay" ~ "Autoregressive (Y→Y)",
+      Parameter == "coverage_bx" ~ "Cross-Lagged (X→Y)",
+      Parameter == "coverage_by" ~ "Cross-Lagged (Y→X)"
+    ),
+    # Simplify model names for the plot headers
+    Model_Label = factor(model_type, levels = c("CLPM", "RI-CLPM", "SRI-CLPM")),
+    N_Label = paste0("N = ", N)
+  )
+
+ggplot(heatmap_comparison_data, aes(x = Parameter_Label, y = factor(timepoints), fill = Rate)) +
+  geom_tile(color = "white") +
+  # Add 2-decimal rounded values
+  geom_text(aes(label = sprintf("%.2f", Rate)), color = "black", size = 2.8) +
+  # Facet by Sample Size and Model
+  facet_grid(N_Label ~ Model_Label) + 
+  scale_fill_gradient(
+    low = "red", 
+    high = "deepskyblue3", 
+    limits = c(0, 1),
+    name = "Coverage"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "95% CI Coverage Rates",
+    subtitle = "Comparing CLPM & RI-CLPM vs. SRI-CLPM (Toeplitz, Segment length = 2)",
+    x = "Model Parameter",
+    y = "Number of Timepoints"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95"),
+    panel.spacing = unit(1, "lines")
+  )
+# 3. Display Results
+view(coverage_summary)
+```
+
+### Explorative 2: Coverage rates
+
+```{r}
+library(future.apply)
+source("functionSource.R")
+
+N_conditions <- c(100, 150, 200)
+replications <- 1000
+timepoints   <- 20
+segmentLength <- 2
+
+# true values
+true_bx <- 0.1
+true_by <- 0.0
+
+mdSpec <- generate_segmented_riclpm(timepoints, timespan = segmentLength)
+
+# worker function
+run_single_rep <- function(rep_idx, n_val) {
+
+  data_list <- DGM(N = n_val, timepoints = timepoints,
+                   beta_xy = true_bx, beta_yx = true_by,
+                   seed = (42 + rep_idx + n_val))
+  
+  fit <- sem(mdSpec, data = data_list$data)
+  
+  pe <- parameterestimates(fit)
+  
+  # Extract unique values 
+  res_bx <- pe %>% filter(label == "bx") %>% slice(1)
+  res_by <- pe %>% filter(label == "by") %>% slice(1)
+  
+  return(data.frame(
+    N      = n_val,
+    rep    = rep_idx,
+    bx_est = res_bx$est, bx_se = res_bx$se, bx_p = res_bx$pvalue,
+    by_est = res_by$est, by_se = res_by$se, by_p = res_by$pvalue
+  ))
+}
+
+plan(multisession, workers = parallel::detectCores() - 1)
+
+cat("Starting parallel simulation...\n")
+
+results_list <- future_lapply(N_conditions, function(n) {
+  lapply(1:replications, function(r) run_single_rep(r, n)) %>% bind_rows()}, 
+  future.seed = TRUE)
+
+sim_results <- bind_rows(results_list)
+
+save_clear(sim_results, filename_prefix = "Coverage_Simulation")
+
+# analysis
+
+sim_results <- Coverage_Simulation_20260501_003515
+
+coverage_table <- sim_results %>%
+  mutate(
+    bx_covered = abs(bx_est - true_bx) / bx_se < 1.96,
+    by_covered = abs(by_est - true_by) / by_se < 1.96
+  ) %>%
+  group_by(N) %>%
+  summarise(
+    Replications = n(),
+    `Coverage bx (0.1)` = mean(bx_covered, na.rm = TRUE),
+    `Coverage by (0.0)` = mean(by_covered, na.rm = TRUE),
+    `Mean bx` = mean(bx_est),
+    `Mean by` = mean(by_est)
+  )
+
+print(coverage_table)
+
+# p-value plot
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# 1. Prepare data and calculate power/error rates for labels
+power_labels <- sim_results %>%
+  group_by(N) %>%
+  summarise(
+    bx_power = mean(bx_p < .05, na.rm = TRUE) * 100,
+    by_error = mean(by_p < .05, na.rm = TRUE) * 100
+  ) %>%
+  pivot_longer(cols = c(bx_power, by_error), names_to = "parameter", values_to = "rate") %>%
+  mutate(
+    # Create the "N = X" label for faceting
+    N_label = paste0("N = ", N),
+    # Match the parameter labels used in the main plot data
+    parameter = ifelse(parameter == "bx_power", "βx (True = 0.1)", "βy (True = 0.0)"),
+    # Create the label text for the geom_text overlay
+    label_text = paste0(ifelse(grepl("βx", parameter), "Power: ", "Type I Error: "), 
+                        round(rate, 1), "%")
+  )
+
+# 2. Main Plot Data
+plot_p_data <- sim_results %>%
+  select(N, bx_p, by_p) %>%
+  pivot_longer(cols = c(bx_p, by_p), names_to = "parameter", values_to = "p_val") %>%
+  mutate(
+    # Create the "N = X" label for faceting to match power_labels
+    N_label = factor(paste0("N = ", N), levels = paste0("N = ", sort(unique(N)))),
+    parameter = ifelse(parameter == "bx_p", "βx (True = 0.1)", "βy (True = 0.0)")
+  )
+
+# 3. Generate Plot
+ggplot(plot_p_data, aes(x = p_val)) +
+  geom_histogram(breaks = seq(0, 1, 0.05), fill = "#2166AC", colour = "white", alpha = 0.8) +
+  
+  # Add the Power/Error rate labels
+  geom_text(data = power_labels, 
+            aes(x = 0.5, y = Inf, label = label_text), 
+            vjust = 2, size = 3.5, fontface = "bold", inherit.aes = FALSE) +
+  
+  # Use N_label instead of N for the grid rows
+  facet_grid(N_label ~ parameter) +
+  theme_classic() +
+  labs(
+    title = "Distribution of p-values by true parameter value and sample size",
+    subtitle = "Power & Type I error: α = .05.",
+    x = "p-value",
+    y = "Frequency"
+  )
+```
+
+### Simulation 3: A global intercept / time-invariant confounding
+
+```{r}
+library(lavaan)
+library(parallel)
+
+source("functionSource.R")
+
+# ==============================================================================
+# PARAMETERS
+# ==============================================================================
+
+DGMconditions <- c("only time-varying", "both")
+replications  <- 1000
+timepoints    <- 30
+N             <- 200
+seed          <- 42
+timespan      <- 3
+
+true_bx <- 0.1
+true_by <- 0.1
+
+# Generate model specs once — they are the same for every replication
+modelSpec_sri    <- generate_segmented_riclpm(T = timepoints, timespan = timespan)
+modelSpec_sri_g  <- generate_segmented_riclpm_global(T = timepoints, timespan = timespan)
+
+# ==============================================================================
+# HELPER: fit one model, return a single-row data frame
+# ==============================================================================
+
+fit_and_extract <- function(model_spec, model_label, dgm_label,
+                            data_df, rep_id, true_bx, true_by) {
+
+  fit <- tryCatch(
+    sem(model_spec, data = data_df),
+    error = function(e) NULL
+  )
+
+  if (!is.null(fit)) {
+    converged  <- lavInspect(fit, "converged")
+    post_check <- tryCatch(lavInspect(fit, "post.check"), error = function(e) FALSE)
+    n_iter     <- tryCatch(fit@optim$iterations,           error = function(e) NA)
+
+    coef_vec <- if (converged) coef(fit) else NULL
+    se_vec   <- if (converged) tryCatch(sqrt(diag(vcov(fit))), error = function(e) NULL) else NULL
+
+    fit_meas <- tryCatch(
+      fitMeasures(fit, c("chisq", "df", "pvalue",
+                         "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+      error = function(e) rep(NA, 9)
+    )
+    rm(fit)
+  } else {
+    converged  <- FALSE
+    post_check <- FALSE
+    n_iter     <- NA
+    coef_vec   <- NULL
+    se_vec     <- NULL
+    fit_meas   <- rep(NA, 9)
+  }
+
+  g <- function(vec, nm) {
+    if (!is.null(vec) && nm %in% names(vec)) vec[nm] else NA_real_
+  }
+
+  data.frame(
+    replication  = rep_id,
+    dgm_condition = dgm_label,
+    model_type   = model_label,
+
+    convergence  = converged,
+    post_check   = post_check,
+    n_iterations = n_iter,
+
+    # Cross-lagged parameters
+    bx      = g(coef_vec, "bx"),
+    by      = g(coef_vec, "by"),
+    bx_se   = g(se_vec,   "bx"),
+    by_se   = g(se_vec,   "by"),
+    bias_bx = g(coef_vec, "bx") - true_bx,
+    bias_by = g(coef_vec, "by") - true_by,
+
+    # Autoregressive parameters
+    ax    = g(coef_vec, "ax"),
+    ay    = g(coef_vec, "ay"),
+    ax_se = g(se_vec,   "ax"),
+    ay_se = g(se_vec,   "ay"),
+
+    # Segmented RI variances (both models)
+    varRIx    = g(coef_vec, "varRIx"),
+    varRIy    = g(coef_vec, "varRIy"),
+    varRIx_se = g(se_vec,   "varRIx"),
+    varRIy_se = g(se_vec,   "varRIy"),
+    covRI     = g(coef_vec, "covRI"),
+    covRI_se  = g(se_vec,   "covRI"),
+
+    # Global RI variances (SRI-CLPM-G only; NA for standard SRI-CLPM)
+    varRIgx    = g(coef_vec, "varRIgx"),
+    varRIgy    = g(coef_vec, "varRIgy"),
+    varRIgx_se = g(se_vec,   "varRIgx"),
+    varRIgy_se = g(se_vec,   "varRIgy"),
+    covRIg     = g(coef_vec, "covRIg"),
+    covRIg_se  = g(se_vec,   "covRIg"),
+
+    # Fit measures
+    chisq  = fit_meas[1],
+    df     = fit_meas[2],
+    pvalue = fit_meas[3],
+    cfi    = fit_meas[4],
+    tli    = fit_meas[5],
+    rmsea  = fit_meas[6],
+    srmr   = fit_meas[7],
+    aic    = fit_meas[8],
+    bic    = fit_meas[9],
+
+    stringsAsFactors = FALSE,
+    row.names        = NULL
+  )
+}
+
+# ==============================================================================
+# WORKER: one replication for one DGM condition — called by parLapply
+# ==============================================================================
+
+run_replication <- function(rep_id, dgm_label, N, timepoints, seed,
+                            true_bx, true_by,
+                            modelSpec_sri, modelSpec_sri_g) {
+
+  # Data generation
+  dgm_args <- list(N = N, timepoints = timepoints, seed = seed + rep_id)
+  if (dgm_label == "both") {
+    dgm_args <- c(dgm_args, list(ri_var_x = 1, ri_var_y = 1, ri_cor = 0.1))
+  }
+  data <- do.call(DGM, dgm_args)
+
+  row_sri   <- fit_and_extract(modelSpec_sri,   "SRI-CLPM",   dgm_label,
+                               data$data, rep_id, true_bx, true_by)
+  row_sri_g <- fit_and_extract(modelSpec_sri_g, "SRI-CLPM-G", dgm_label,
+                               data$data, rep_id, true_bx, true_by)
+  rm(data)
+
+  rbind(row_sri, row_sri_g)
+}
+
+# ==============================================================================
+# PARALLELISATION SETUP
+# ==============================================================================
+
+n_cores <- max(1L, detectCores() - 1L)
+cat("Using", n_cores, "cores\n")
+
+cl <- makeCluster(n_cores)
+
+# Export everything workers need
+clusterExport(cl, varlist = c(
+  "DGM", "generate_segmented_riclpm", "generate_segmented_riclpm_global",
+  "fit_and_extract", "run_replication",
+  "modelSpec_sri", "modelSpec_sri_g",
+  "N", "timepoints", "seed", "true_bx", "true_by"
+))
+clusterEvalQ(cl, { library(lavaan); library(mvtnorm); source("functionSource.R") })
+
+# ==============================================================================
+# MAIN LOOP — one parLapply per DGM condition
+# ==============================================================================
+
+data_struct       <- create_metadata()
+start_time_total  <- Sys.time()
+all_results       <- vector("list", length(DGMconditions))
+
+for (ci in seq_along(DGMconditions)) {
+  dgm_label <- DGMconditions[ci]
+  cat("\n--- DGM condition:", dgm_label, "---\n")
+
+  clusterExport(cl, varlist = "dgm_label", envir = environment())
+
+  condition_results <- parLapply(
+    cl,
+    seq_len(replications),
+    fun      = run_replication,
+    dgm_label       = dgm_label,
+    N               = N,
+    timepoints      = timepoints,
+    seed            = seed,
+    true_bx         = true_bx,
+    true_by         = true_by,
+    modelSpec_sri   = modelSpec_sri,
+    modelSpec_sri_g = modelSpec_sri_g
+  )
+
+  all_results[[ci]] <- do.call(rbind, condition_results)
+
+  # Checkpoint after each condition completes
+  elapsed <- round(difftime(Sys.time(), start_time_total, units = "mins"), 1)
+  cat("Condition '", dgm_label, "' done |", elapsed, "min elapsed\n")
+  saveRDS(all_results[[ci]],
+          paste0("sim_srig_checkpoint_", gsub(" ", "_", dgm_label), ".rds"))
+}
+
+stopCluster(cl)
+
+# ==============================================================================
+# SAVE
+# ==============================================================================
+
+replication_results <- do.call(rbind, all_results)
+rownames(replication_results) <- NULL
+
+data_struct$results <- replication_results
+data_struct$simulation_parameters <- list(
+  replications  = replications,
+  N             = N,
+  timepoints    = timepoints,
+  timespan      = timespan,
+  DGMconditions = DGMconditions,
+  seed          = seed,
+  true_bx       = true_bx,
+  true_by       = true_by
+)
+
+filename <- save_clear(data_struct, filename_prefix = "sim_srig_comparison")
+
+total_time <- difftime(Sys.time(), start_time_total, units = "mins")
+cat("\n=== Simulation Completed ===\n")
+cat("Total time:", round(total_time, 2), "minutes\n")
+cat("Results saved to:", filename, "\n")
+```
+
+#### Plotting
+
+```{r}
+sim     <- sim_srig_comparison_20260312_014452
+results <- sim$results
+
+true_beta <- 0.1
+
+plot_data <- results %>%
+  mutate(
+    model_type    = factor(model_type, levels = c("SRI-CLPM", "SRI-CLPM-G")),
+    dgm_condition = factor(dgm_condition,
+                           levels = c("only time-varying", "both"),
+                           labels = c("Only time-varying confounding",
+                                      "Time-varying + time-invariant confounding"))
+  )
+
+model_colours <- c("SRI-CLPM"   = "#2166AC",
+                   "SRI-CLPM-G" = "#B2182B")
+
+theme_apa <- theme_classic(base_size = 11, base_family = "sans") +
+  theme(
+    axis.title         = element_text(size = 10),
+    axis.text          = element_text(size = 9),
+    axis.line          = element_line(colour = "black", linewidth = 0.4),
+    strip.background   = element_blank(),
+    strip.text         = element_text(face = "bold", size = 10),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.text        = element_text(size = 9),
+    legend.key.size    = unit(0.5, "lines"),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.3),
+    panel.grid.major.x = element_blank(),
+    plot.margin        = margin(8, 10, 6, 8),
+    plot.caption       = element_text(size = 8, hjust = 0, margin = margin(t = 6))
+  )
+
+p <- ggplot(plot_data, aes(x = model_type, y = bx,
+                            fill = model_type, colour = model_type)) +
+  geom_hline(yintercept = true_beta, linetype = "dashed",
+             colour = "black", linewidth = 0.45) +
+  geom_boxplot(alpha        = 0.3,
+               width        = 0.5,
+               outlier.size  = 0.6,
+               outlier.alpha = 0.3,
+               linewidth     = 0.4) +
+  facet_wrap(~dgm_condition) +
+  scale_fill_manual(values   = model_colours) +
+  scale_colour_manual(values = model_colours) +
+  scale_x_discrete(labels = NULL) +
+  labs(
+    x       = NULL,
+    y       = "Cross-lagged estimate (bx)",
+    caption = paste0("Note. Dashed line = true value (", true_beta, "). ",
+                     "N = ", sim$simulation_parameters$N, "; ",
+                     sim$simulation_parameters$replications,
+                     " replications per condition.")
+  ) +
+  theme_apa
+
+p
+
+# ggsave("fig_srig_comparison.png", p, width = 6.5, height = 4, dpi = 300)
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+replication_results <- sim_srig_comparison_20260312_014452$results
+
+# 1. Prepare the data: Pivot to wide format so we have one column per model
+plot_data <- replication_results %>%
+  # Filter for converged models only to ensure valid comparisons
+  filter(convergence == TRUE) %>%
+  # Keep only necessary columns
+  select(replication, dgm_condition, model_type, bx) %>%
+  # Pivot so model types are columns
+  pivot_wider(
+    names_from = model_type, 
+    values_from = bx
+  )
+
+# 2. Create the scatterplot
+ggplot(plot_data, aes(x = `SRI-CLPM`, y = `SRI-CLPM-G`)) +
+  geom_point(size = 2, alpha = 0.1, color = "steelblue") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  # Separate plots for 'only time-varying' vs 'both'
+  facet_wrap(~dgm_condition) +
+  # Add the true parameter value as reference lines
+  geom_vline(xintercept = 0.1, linetype = "dotted") +
+  geom_hline(yintercept = 0.1, linetype = "dotted") +
+  labs(
+    title = "Cross-lagged Parameter Estimates Across Models",
+    subtitle = "Dashed red line = Equal estimates; Dotted lines = True value (0.1)",
+    x = "SRI-CLPM Estimate",
+    y = "SGRI-CLPM Estimate"
+  ) +
+  theme_minimal()
+```
+
+### Explorative 3: Confounding Variance Decomposition
+
+```{r}
+library(future.apply)
+source("functionSource.R")
+
+# set-up
+timepoints   <- 20
+N            <- 200
+replications <- 500 
+plan(multisession, workers = parallel::detectCores() - 1)
+
+# model specs
+specs <- list(
+  CLPM  = generate_clpm(timepoints),
+  RICLPM = generate_riclpm(timepoints),
+  SRI   = generate_segmented_riclpm(timepoints, timespan = 2),
+  SGRI  = generate_segmented_riclpm_global(timepoints, timespan = 2)
+)
+
+cond_table <- data.frame(
+  cond_name = c("pure", "time_var", "time_invar", "combined"),
+  n_conf    = c(0, 5, 0, 5),
+  ri_var    = c(0, 0, 1, 1),
+  ri_cor    = c(0, 0,.1,.1)
+)
+
+# Worker function
+compare_models_rep <- function(rep_idx, cond_row) {
+  
+  # Generate Data
+  sim_data <- DGM(N = N, timepoints = timepoints, 
+                  n_x_confounders = cond_row$n_conf, 
+                  n_y_confounders = cond_row$n_conf,
+                  ri_var_x = cond_row$ri_var,
+                  ri_var_y = cond_row$ri_var,
+                  ri_cor = cond_row$ri_cor,
+                  seed = 123 + rep_idx)$data
+  
+  results <- lapply(names(specs), function(m_name) {
+    fit <- sem(specs[[m_name]], data = sim_data)
+
+    fm <- fitMeasures(fit, c("logl", "df", "aic", "bic", "cfi", "tli", "rmsea", "srmr"))
+    pe <- parameterEstimates(fit)
+    
+    # Helper to safely extract parameters by label
+    get_v <- function(lab) {
+      v <- pe$est[pe$label == lab]
+      if(length(v) > 0) v[1] else NA_real_
+    }
+    
+    data.frame(
+      model     = m_name,
+      condition = cond_row$cond_name,
+      rep       = rep_idx,
+      bx      = get_v("bx"),
+      varRIgx = get_v("varRIgx"),
+      varRIgy = get_v("varRIgy"),
+      varRIx  = get_v("varRIx"),
+      varRIy  = get_v("varRIy"),
+      logl = fm["logl"], df = fm["df"], AIC = fm["aic"], BIC = fm["bic"],
+      CFI = fm["cfi"], TLI = fm["tli"], RMSEA = fm["rmsea"], SRMR = fm["srmr"]
+    )
+  })
+  return(bind_rows(results))
+}
+
+# run
+all_comparisons <- list()
+
+for (i in 1:nrow(cond_table)) {
+  cat("Simulating Condition:", cond_table$cond_name[i], "\n")
+  all_comparisons[[i]] <- future_lapply(1:replications, function(r) {
+    compare_models_rep(r, cond_table[i, ])
+  }, future.seed = TRUE) %>% bind_rows()
+}
+
+final_comp_df <- bind_rows(all_comparisons)
+
+# Save results
+save_clear(final_comp_df, filename_prefix = "SGRI_CLPM_Simulation")
+
+final_df <- SGRI_CLPM_Simulation_20260503_031342
+
+# 1. Define the desired order of conditions
+ordered_conditions <- c("pure", "time_var", "time_invar", "combined")
+
+# 2. Calculate the mean estimates for the SGRI model
+summary_table <- final_df %>%
+  filter(model == "SGRI") %>%
+  group_by(condition) %>%
+  summarise(
+    Mean_varRIgx = mean(varRIgx, na.rm = TRUE),
+    Mean_varRIx  = mean(varRIx, na.rm = TRUE),
+    Mean_bx      = mean(bx, na.rm = TRUE)
+  ) %>%
+  # 3. Apply the specific row order
+  mutate(condition = factor(condition, levels = ordered_conditions)) %>%
+  arrange(condition)
+
+# Display the results
+print(summary_table)
+
+```
+
+# REWRITE
+
+PLOT 1
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggh4x) # Required for individual facet scaling
+
+sim     <- Simulation1_20260311_212309 # load in data
+results <- sim$results
+
+results <- results %>%
+  # unlist conditions
+  mutate(
+    autoreg = unlist(autoreg),
+    nconf   = unlist(nconf)
+  ) %>%
+  # 
+  mutate(
+    bx = sapply(coefficients, function(c)
+      if (!is.null(c) && "bx" %in% names(c)) c["bx"] else NA_real_)
+  ) %>%
+  filter(convergence == TRUE)
+
+# true parameter value
+true_beta <- 0.1
+
+# One row per condition x timepoint: compute bias and keep varRIx
+plot_data <- results %>%
+  transmute(
+    autoreg,
+    nconf,
+    timepoints_used,
+    bias_bx = bx - true_beta,
+    varRIx
+  ) %>%
+  pivot_longer(
+    cols      = c(bias_bx, varRIx),
+    names_to  = "outcome",
+    values_to = "value"
+  ) %>%
+  mutate(
+    outcome = factor(outcome,
+                     levels = c("bias_bx", "varRIx"),
+                     labels = c("Bias in bx", "Var(RI_x) estimate")),
+    facet_row = factor(paste0("\u03b1 = ", autoreg)),
+    facet_col = factor(paste0("Confounders = ", nconf),
+                       levels = paste0("Confounders = ", sort(unique(nconf))))
+  )
+
+# ==============================================================================
+# SHARED APA THEME  (defined once; reused by all subsequent plots)
+# ==============================================================================
+
+theme_apa <- theme_classic(base_size = 11, base_family = "sans") +
+  theme(
+    axis.title         = element_text(size = 10),
+    axis.text          = element_text(size = 9),
+    axis.line          = element_line(colour = "black", linewidth = 0.4),
+    strip.background   = element_blank(),
+    strip.text         = element_text(face = "bold", size = 9),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.text        = element_text(size = 9),
+    legend.key.width   = unit(1.5, "lines"),
+    legend.key.size    = unit(0.5, "lines"),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.3),
+    panel.grid.major.x = element_blank(),
+    plot.margin        = margin(8, 10, 6, 8),
+    plot.caption       = element_text(size = 8, hjust = 0, margin = margin(t = 6))
+  )
+
+# Okabe-Ito colourblind-safe two-colour pair used for outcome lines
+outcome_colours <- c(
+  "Bias in cross-lagged parameter" = "#0072B2",  # blue
+  "Random intercept variance"      = "#D55E00"   # vermilion
+)
+outcome_linetypes <- c(
+  "Bias in cross-lagged parameter" = "solid",
+  "Random intercept variance"      = "dashed"
+)
+
+# ==============================================================================
+# PLOT DATA
+# ==============================================================================
+
+plot_data <- results %>%
+  transmute(
+    autoreg,
+    nconf,
+    timepoints_used,
+    bias_bx = bx - true_beta,
+    varRIx
+  ) %>%
+  pivot_longer(
+    cols      = c(bias_bx, varRIx),
+    names_to  = "outcome",
+    values_to = "value"
+  ) %>%
+  mutate(
+    outcome = factor(outcome,
+                     levels = c("bias_bx", "varRIx"),
+                     labels = c("Bias in cross-lagged parameter",
+                                "Random intercept variance")),
+    facet_row = factor(paste0("\u03b1 = ", autoreg)),
+    facet_col = factor(paste0("Confounders = ", nconf),
+                       levels = paste0("Confounders = ", sort(unique(nconf))))
+  )
+
+# 2. Define the emphasis data and scales
+emphasis_box <- data.frame(facet_row = "α = 0.3", facet_col = "Confounders = 6")
+shared_y_scale  <- scale_y_continuous(limits = c(0, 0.2)) 
+special_y_scale <- scale_y_continuous(limits = c(0, 1.5))
+
+# ==============================================================================
+# PLOT
+# ==============================================================================
+
+p <- ggplot(plot_data,
+            aes(x        = timepoints_used,
+                y        = value,
+                colour   = outcome,
+                linetype = outcome)) +
+  
+  # The Callout Block (Background shading for bottom-right)
+  geom_rect(data = emphasis_box, 
+            aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            fill = "grey80", alpha = 0.4, inherit.aes = FALSE) +
+
+  geom_hline(yintercept = 0, linetype = "dotted",
+             colour = "black", linewidth = 0.4) +
+  
+  geom_line(linewidth = 0.75, na.rm = TRUE) +
+  
+  facet_wrap(~ facet_row + facet_col, nrow = 2, scales = "free_y") + 
+  
+  facetted_pos_scales(
+    y = list(
+      facet_row == "α = 0.2" ~ shared_y_scale, 
+      facet_col == "Confounders = 4" & facet_row == "α = 0.3" ~ shared_y_scale,
+      facet_col == "Confounders = 6" & facet_row == "α = 0.3" ~ special_y_scale
+    )
+  ) +
+  
+  scale_colour_manual(values = outcome_colours) +
+  scale_linetype_manual(values = outcome_linetypes) +
+  scale_x_continuous(breaks = seq(0, 75, 15),
+                     expand = expansion(mult = c(0.01, 0.02))) +
+  
+  theme_apa +
+  theme(
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    legend.key.width = unit(2.5, "lines") # Slightly wider for longer labels
+  ) +
+  
+  labs(
+    x       = "Number of timepoints",
+    y       = "Estimate"
+#    caption = "Note. \u03b1 = autoregressive effect; confounders = number of time-arying confounders per variable.\nThe shaded panel uses a different y-axis scale (0\u20131.5); all other panels use 0\u20130.2."
+  )
+
+p
+
+ggsave("images/fig_sim1_2x2.png", p, width = 6.5, height = 5.5, dpi = 300)
+```
+
+Plot 2
+
+```{r}
+sim     <- sim_T_effect_20260329_135008
+results <- sim$results
+
+true_beta <- 0.1
+
+# Create a combined model label that folds timespan into the model name
+# for SRI variants, and leaves CLPM/RI-CLPM as-is
+plot_data <- results %>%
+  mutate(
+    model_label = case_when(
+      model_type %in% c("CLPM", "RI-CLPM") ~ model_type,
+      TRUE ~ paste0(model_type, " (SL=", timespan, ")")
+    ),
+    model_label = factor(model_label, levels = c(
+      "CLPM",
+      "RI-CLPM",
+      "SRI-CLPM (SL=2)",
+      "SRI-CLPM (SL=3)",
+      "SRI-CLPM-free (SL=2)",
+      "SRI-CLPM-free (SL=3)"
+    )),
+    N_label = factor(paste0("N = ", N),
+                     levels = paste0("N = ", sort(unique(N))))
+  )
+
+mean_lines <- plot_data %>%
+  group_by(model_label, timepoints, N_label) %>%
+  summarise(mean_bx = mean(bx, na.rm = TRUE), .groups = "drop")
+
+model_colours <- c(
+  "CLPM"                 = "#999999",  # grey
+  "RI-CLPM"              = "#0072B2",  # blue
+  "SRI-CLPM (SL=2)"      = "#D55E00",  # vermilion
+  "SRI-CLPM (SL=3)"      = "#E69F00",  # orange
+  "SRI-CLPM-free (SL=2)" = "#009E73",  # green
+  "SRI-CLPM-free (SL=3)" = "#56B4E9"   # sky blue
+)
+
+# theme_apa already defined in Simulation 1 plotting chunk
+
+# 6 models — evenly spaced offsets centred on each timepoint tick
+n_models     <- length(levels(plot_data$model_label))
+dodge_offset <- 2.0
+box_width    <- dodge_offset * 0.13
+
+offsets <- setNames(
+  seq(-dodge_offset / 2, dodge_offset / 2, length.out = n_models),
+  levels(plot_data$model_label)
+)
+
+plot_data <- plot_data %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+mean_lines <- mean_lines %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+p <- ggplot(plot_data,
+            mapping = aes(colour = model_label, fill = model_label)) +
+
+  geom_hline(yintercept = true_beta, linetype = "dashed",
+             colour = "black", linewidth = 0.45) +
+
+  geom_boxplot(
+    aes(x = x_dodged, y = bx,
+        group = interaction(timepoints, model_label)),
+    width         = box_width,
+    alpha         = 0.4,
+    outlier.size  = 0.5,
+    outlier.alpha = 0.2,
+    linewidth     = 0.35
+  ) +
+
+  facet_wrap(~ N_label, ncol = 1) +
+  
+  scale_colour_manual(values = model_colours, drop = FALSE) +
+  scale_fill_manual(values   = model_colours, drop = FALSE) +
+  scale_x_continuous(
+    breaks = sort(unique(plot_data$timepoints)),
+    labels = sort(unique(plot_data$timepoints))
+  ) +
+
+  labs(
+    x       = "Number of timepoints",
+    y       = "Cross-lagged estimate (\u03b2x)",
+  ) +
+
+  theme_apa +
+  guides(colour = guide_legend(nrow = 2),
+         fill   = guide_legend(nrow = 2))
+
+p
+
+ggsave("images/fig_T_effect_bx.png", p, width = 8, height = 9, dpi = 300)
+
+# 1. Define True Values (Ensure true_ax and true_ay match your DGM settings)
+true_ax <- 0.2  # Default autocorr_effects in your DGM is 0.2
+true_ay <- 0.2
+
+# 2. Calculate Coverage
+coverage_summary <- results %>%
+  filter(convergence == TRUE) %>%
+  mutate(
+    # Cross-lagged coverage
+    bx_covered = (bx - 1.96 * bx_se) <= true_bx & (bx + 1.96 * bx_se) >= true_bx,
+    by_covered = (by - 1.96 * by_se) <= true_by & (by + 1.96 * by_se) >= true_by,
+    
+    # Autoregressive coverage
+    ax_covered = (ax - 1.96 * ax_se) <= true_ax & (ax + 1.96 * ax_se) >= true_ax,
+    ay_covered = (ay - 1.96 * ay_se) <= true_ay & (ay + 1.96 * ay_se) >= true_ay
+  ) %>%
+  group_by(model_type, N, timepoints, timespan) %>%
+  summarise(
+    n_valid = n(),
+    coverage_bx = mean(bx_covered, na.rm = TRUE),
+    coverage_by = mean(by_covered, na.rm = TRUE),
+    coverage_ax = mean(ax_covered, na.rm = TRUE),
+    coverage_ay = mean(ay_covered, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Filter for benchmarks and the specific SRI variant
+heatmap_comparison_data <- coverage_summary %>%
+  filter(
+    model_type == "CLPM" | 
+    model_type == "RI-CLPM" | 
+    (model_type == "SRI-CLPM" & timespan == 2)
+  ) %>%
+  pivot_longer(
+    cols = starts_with("coverage_"), 
+    names_to = "Parameter", 
+    values_to = "Rate"
+  ) %>%
+  mutate(
+    # Explicit Parameter Labels
+    Parameter_Label = case_when(
+      Parameter == "coverage_ax" ~ "Autoregressive (X→X)",
+      Parameter == "coverage_ay" ~ "Autoregressive (Y→Y)",
+      Parameter == "coverage_bx" ~ "Cross-Lagged (X→Y)",
+      Parameter == "coverage_by" ~ "Cross-Lagged (Y→X)"
+    ),
+    # Simplify model names for the plot headers
+    Model_Label = factor(model_type, levels = c("CLPM", "RI-CLPM", "SRI-CLPM")),
+    N_Label = paste0("N = ", N)
+  )
+
+p_heatmap <- ggplot(heatmap_comparison_data,
+                    aes(x = Parameter_Label, y = factor(timepoints), fill = Rate)) +
+  geom_tile(colour = "white", linewidth = 0.4) +
+  geom_text(aes(label = sprintf("%.2f", Rate)), colour = "black", size = 2.8) +
+  facet_grid(N_Label ~ Model_Label) +
+  scale_fill_gradient2(
+    low      = "#D55E00",   # vermilion  (low coverage)
+    mid      = "#F0E442",   # yellow     (nominal ~.95)
+    high     = "#0072B2",   # blue       (high coverage)
+    midpoint = 0.5,
+    limits   = c(0, 1),
+    name     = "Coverage rate",
+  ) +
+  scale_x_discrete(labels = function(x) gsub(" ", "\n", x)) +
+  labs(
+    x       = "Parameter",
+    y       = "Number of timepoints"
+  ) +
+  theme_apa +
+  theme(
+    axis.text.x      = element_text(angle = 30, hjust = 1, size = 8),
+    strip.background = element_blank(),
+    strip.text       = element_text(face = "bold", size = 9),
+    panel.spacing    = unit(0.8, "lines"),
+    legend.key.width = unit(1.5, "lines"),
+    legend.position = "none"
+  )
+
+p_heatmap
+
+ggsave("images/fig_coverage_heatmap.png", p_heatmap, width = 7, height = 5.5, dpi = 300)
+# 3. Display Results
+```
+
+Explo 2
+
+```{r}
+# analysis
+
+sim_results <- Coverage_Simulation_20260501_003515
+
+coverage_table <- sim_results %>%
+  mutate(
+    bx_covered = abs(bx_est - true_bx) / bx_se < 1.96,
+    by_covered = abs(by_est - true_by) / by_se < 1.96
+  ) %>%
+  group_by(N) %>%
+  summarise(
+    Replications = n(),
+    `Coverage bx (0.1)` = mean(bx_covered, na.rm = TRUE),
+    `Coverage by (0.0)` = mean(by_covered, na.rm = TRUE),
+    `Mean bx` = mean(bx_est),
+    `Mean by` = mean(by_est)
+  )
+
+print(coverage_table)
+
+# p-value plot
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# 1. Prepare data and calculate power/error rates for labels
+power_labels <- sim_results %>%
+  group_by(N) %>%
+  summarise(
+    bx_power = mean(bx_p < .05, na.rm = TRUE) * 100,
+    by_error = mean(by_p < .05, na.rm = TRUE) * 100
+  ) %>%
+  pivot_longer(cols = c(bx_power, by_error), names_to = "parameter", values_to = "rate") %>%
+  mutate(
+    # Create the "N = X" label for faceting
+    N_label = paste0("N = ", N),
+    # Match the parameter labels used in the main plot data
+    parameter = ifelse(parameter == "bx_power", "βx (True = 0.1)", "βy (True = 0.0)"),
+    # Create the label text for the geom_text overlay
+    label_text = paste0(ifelse(grepl("βx", parameter), "Power: ", "Type I Error: "), 
+                        round(rate, 1), "%")
+  )
+
+# 2. Main Plot Data
+plot_p_data <- sim_results %>%
+  select(N, bx_p, by_p) %>%
+  pivot_longer(cols = c(bx_p, by_p), names_to = "parameter", values_to = "p_val") %>%
+  mutate(
+    # Create the "N = X" label for faceting to match power_labels
+    N_label = factor(paste0("N = ", N), levels = paste0("N = ", sort(unique(N)))),
+    parameter = ifelse(parameter == "bx_p", "βx (True = 0.1)", "βy (True = 0.0)")
+  )
+
+p_pval <- ggplot(plot_p_data, aes(x = p_val)) +
+  geom_histogram(breaks = seq(0, 1, 0.05),
+                 fill = "#0072B2", colour = "white", alpha = 0.8) +
+  geom_text(data       = power_labels,
+            aes(x = 0.5, y = Inf, label = label_text),
+            vjust       = 2, size = 3.2, fontface = "bold",
+            inherit.aes = FALSE) +
+  facet_grid(N_label ~ parameter) +
+  scale_x_continuous(
+  breaks = seq(0, 1, 0.25),
+  labels = function(x) ifelse(x %in% c(0, 1), as.integer(x), x),
+  expand = expansion(mult = c(0, 0.02))
+) +
+  labs(
+    x       = "p-value",
+    y       = "Frequency",
+  ) +
+  theme_apa +
+  theme(strip.text = element_text(face = "bold", size = 9))
+
+p_pval
+
+ggsave("images/fig_power.png", p_pval, width = 7, height = 5.5, dpi = 300)
+```
+
+Plot 3
+
+```{r}
+sim     <- sim_srig_comparison_20260312_014452
+results <- sim$results
+
+true_beta <- 0.1
+
+plot_data <- results %>%
+  mutate(
+    model_type    = factor(model_type, levels = c("SRI-CLPM", "SRI-CLPM-G")),
+    dgm_condition = factor(dgm_condition,
+                           levels = c("only time-varying", "both"),
+                           labels = c("Only time-varying confounding",
+                                      "Time-varying + time-invariant confounding"))
+  )
+
+plot_data <- plot_data %>%
+  mutate(
+    model_type = factor(model_type,
+                        levels = c("SRI-CLPM", "SRI-CLPM-G"),
+                        labels = c("SRI-CLPM",  "SGRI-CLPM"))
+  )
+
+model_colours <- c(
+  "SRI-CLPM"  = "#0072B2",
+  "SGRI-CLPM" = "#D55E00"
+)
+
+# theme_apa already defined in Simulation 1 plotting chunk
+
+p <- ggplot(plot_data, aes(x = model_type, y = bx,
+                            fill = model_type, colour = model_type)) +
+  geom_hline(yintercept = true_beta, linetype = "dashed",
+             colour = "black", linewidth = 0.45) +
+  geom_boxplot(alpha        = 0.3,
+               width        = 0.5,
+               outlier.size  = 0.6,
+               outlier.alpha = 0.3,
+               linewidth     = 0.4) +
+  facet_wrap(~dgm_condition) +
+  scale_fill_manual(values   = model_colours) +
+  scale_colour_manual(values = model_colours) +
+  scale_x_discrete(labels = NULL) +
+  labs(
+    x       = NULL,
+    y       = "Cross-lagged parameter (\u03b2x)"
+  ) +
+  theme_apa
+
+p
+ggsave("images/fig_srig_comparison.png", p, width = 6.5, height = 4, dpi = 300)
+```
+
+plot 4
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+replication_results <- sim_srig_comparison_20260312_014452$results
+
+# theme_apa already defined in Simulation 1 plotting chunk
+
+# Pivot to wide format so we have one column per model
+plot_data <- replication_results %>%
+  select(replication, dgm_condition, model_type, bx) %>%
+  pivot_wider(names_from = model_type, values_from = bx)
+
+p_scatter <- ggplot(plot_data, aes(x = `SRI-CLPM`, y = `SRI-CLPM-G`)) +
+  geom_point(size = 1.5, alpha = 0.15, colour = "#0072B2") +
+  geom_abline(intercept = 0, slope = 1,
+              linetype = "dashed", colour = "black", linewidth = 0.45) +
+  geom_vline(xintercept = 0.1, linetype = "dotted",
+             colour = "black", linewidth = 0.35) +
+  geom_hline(yintercept = 0.1, linetype = "dotted",
+             colour = "black", linewidth = 0.35) +
+  facet_wrap(~dgm_condition) +
+  scale_x_continuous(expand = expansion(mult = 0.02)) +
+  scale_y_continuous(expand = expansion(mult = 0.02)) +
+  labs(
+    x       = "SRI-CLPM estimate (\u03b2x)",
+    y       = "SGRI-CLPM estimate (\u03b2x)",
+  ) +
+  theme_apa +
+  theme(strip.text = element_text(face = "bold", size = 9))
+
+p_scatter
+ggsave("images/fig_scatter.png", p_scatter, width = 6.5, height = 4, dpi = 300)
+```
+
+Plot 5
+
+```{r}
+final_df <- SGRI_CLPM_Simulation_20260503_031342
+
+# 1. Define the desired order of conditions
+ordered_conditions <- c("pure", "time_var", "time_invar", "combined")
+
+# 2. Calculate the mean estimates for the SGRI model
+summary_table <- final_df %>%
+  filter(model == "SGRI") %>%
+  group_by(condition) %>%
+  summarise(
+    Mean_varRIgx = mean(varRIgx, na.rm = TRUE),
+    Mean_varRIx  = mean(varRIx, na.rm = TRUE),
+    Mean_bx      = mean(bx, na.rm = TRUE)
+  ) %>%
+  # 3. Apply the specific row order
+  mutate(condition = factor(condition, levels = ordered_conditions)) %>%
+  arrange(condition)
+
+# Display the results
+print(summary_table)
 ```

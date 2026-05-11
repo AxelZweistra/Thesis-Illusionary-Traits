@@ -1,54 +1,49 @@
 ### Functions for illusory trait thesis 
 
-## data generating mechanism 
+## data generating mechanism - updated to be able to set different CL params
 
 DGM <- function(N = 20000, 
                 autocorr_effects = 0.2, 
                 timepoints = 100, 
                 n_x_confounders = 5, 
                 n_y_confounders = 5,
-                beta_focal = 0.1,
+                beta_focal = 0.1,    # Maintained for backward compatibility
+                beta_xy = NULL,      # New: X -> Y
+                beta_yx = NULL,      # New: Y -> X
                 beta_covfocal = 0.1,
                 beta_covnofocal = 0.01,
                 sigma = 0.5,
-                # -- RANDOM INTERCEPT PARAMETERS (default: no stable component) --
-                # Variance of RI for X (0 = no time-invariant confounding)
                 ri_var_x = 0, 
-                # Variance of RI for Y (0 = no time-invariant confounding)
                 ri_var_y = 0,    
-                ri_cor = 0, # Correlation between RI_x and RI_y
+                ri_cor = 0, 
                 seed = 427) 
 {
+  # Backward Compatibility Logic (update to allow separate beta specifications:
+  # If the specific beta_xy/yx are NULL, they default to beta_focal
+  if (is.null(beta_xy)) beta_xy <- beta_focal
+  if (is.null(beta_yx)) beta_yx <- beta_focal
   
-  # Set seed for reproducibility
   set.seed(seed)
   
-  # Rename some parameters to match the variables used by the original paper
+  # rename to match original by Bailey
   T <- timepoints
   c1 <- n_x_confounders
   c2 <- n_y_confounders
   alpha <- autocorr_effects
   
-  # Helper functions for matrix operations
+  # should already be in the enviroment, failstop
   irow <- function(x) matrix(x, nrow = sqrt(length(x)), byrow = TRUE)
   row <- function(x) as.vector(t(x))
   
-  # --- Determine which type of data to generate ---
   include_time_varying_confounding <- (c1 > 0 || c2 > 0)
   include_time_invariant_confounding <- (ri_var_x > 0 || ri_var_y > 0)
   
-  # --- Generate Time-Varying Data (CLPM process) ---
-  
+  # time-varying component only needs to get called if necessary
   if (include_time_varying_confounding) {
-    # Original DGM with time-varying confounders (taken from Bailey et al. 2024)
-    
-    # Total number of variables (X, Y, and confounders)
     v <- c1 + c2 + 2
-    
-    # A: Matrix of path coefficients
     A <- matrix(NA, v, v)
     diag(A) <- alpha
-    A[lower.tri(A, diag = FALSE)] <- beta_covnofocal 
+    A[lower.tri(A, diag = FALSE)] <- beta_covnofocal
     A[upper.tri(A, diag = FALSE)] <- beta_covnofocal
     
     c1t <- 3:(2+c1)
@@ -61,98 +56,68 @@ DGM <- function(N = 20000,
     A[c1t, c1t][upper.tri(A[c1t, c1t], diag = FALSE)] <- beta_covfocal
     A[c2t, c2t][lower.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
     A[c2t, c2t][upper.tri(A[c2t, c2t], diag = FALSE)] <- beta_covfocal
-    A[1,2] <- beta_focal
-    A[2,1] <- beta_focal
     
-    # Check the max eigenvalue (to check stationarity)
-    max_eigenvalue <- max(eigen(A)$values)
+    # Asymmetrical paths:
+    # In the original matrix A, row 2 col 1 is X -> Y; row 1 col 2 is Y -> X
+    # Updated path for focal variables
+    A[2, 1] <- beta_xy # X -> Y
+    A[1, 2] <- beta_yx # Y -> X
+    
+    # Use Mod() to handle potential complex values from non-symmetric A
+    max_eigenvalue <- max(Mod(eigen(A)$values))
+    
     if (max_eigenvalue >= 1) {
-      warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),
+      warning(paste("Maximum eigenvalue magnitude is", round(max_eigenvalue, 4),
                     "- the system may not be stationary"))
     }
     
-    # Sigma: Var-cov matrix of time-specific residuals
     Sigma <- diag(rep(sigma, v))
-    
-    # Sigma1: Stationary Var-cov matrix for the first time point
     Sigma1 <- irow(solve(diag(dim(A)[1]^2) - t(A) %x% t(A)) %*% row(Sigma))
-    
-    # Mean1: Stationary means for first time point
     Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
     
   } else {
-    # Simple bivariate VAR(1) without confounders (pure CLPM)
-    
     v <- 2
+
+    A <- matrix(c(alpha, beta_yx, beta_xy, alpha), nrow = 2, byrow = TRUE)
     
-    # A: Matrix of path coefficients (just X and Y)
-    A <- matrix(c(alpha, beta_focal, beta_focal, alpha), nrow = 2, byrow = TRUE)
-    
-    # Check the max eigenvalue
+    # warning for non-stationarity
     max_eigenvalue <- max(eigen(A)$values)
     if (max_eigenvalue >= 1) {
       warning(paste("Maximum eigenvalue is", round(max_eigenvalue, 4),
                     "- the system may not be stationary"))
     }
     
-    # Sigma: Var-cov matrix of time-specific residuals
     Sigma <- diag(rep(sigma, v))
-    
-    # Sigma1: Stationary Var-cov matrix for the first time point
     Sigma1 <- irow(solve(diag(dim(A)[1]^2) - t(A) %x% t(A)) %*% row(Sigma))
-    
-    # Mean1: Stationary means for first time point
     Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
   }
   
-  # --- Generate data ---
-  
-  # Create empty dataframe
   df_within <- matrix(NA, nrow = N, ncol = 2*T)
-  
-  # Generate the initial values for X and Y and store them in D
   D <- rmvnorm(N, mean = Mean1, Sigma1)
-  
-  # Store the initial data from D to df_within
   df_within[, 1] <- D[, 1]
   df_within[, 1+T] <- D[, 2]
   
-  # Update D and df_within till time T
   for (i in 2:T) {
     D <- D %*% t(A) + rmvnorm(N, sigma = Sigma)
     df_within[, i] <- D[, 1]
     df_within[, i+T] <- D[, 2]
   }
   
-  # --- Generate Random Intercepts (Time-Invariant Confounders) If Needed ---
-  
+  # only necessary if time-invariant confounding is present
   if (include_time_invariant_confounding) {
-    # Calculate covariance from correlation and variances
-    ri_cov <- ri_cor * sqrt(ri_var_x * ri_var_y)
-    ri_sigma_mat <- matrix(c(ri_var_x, ri_cov, ri_cov, ri_var_y), nrow = 2)
-    
-    # Generate N random intercepts
+    ri_cov_val <- ri_cor * sqrt(ri_var_x * ri_var_y)
+    ri_sigma_mat <- matrix(c(ri_var_x, ri_cov_val, ri_cov_val, ri_var_y), nrow = 2)
     RIs <- rmvnorm(N, mean = c(0, 0), sigma = ri_sigma_mat)
     colnames(RIs) <- c("RI_x", "RI_y")
-    
-    # Create final dataframe with RIs added
     df_final <- df_within
     colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
-    
-    # Add RI_x to all X columns (1 to T)
     df_final[, 1:T] <- df_final[, 1:T] + RIs[, 1]
-    
-    # Add RI_y to all Y columns (T+1 to 2T)
     df_final[, (T+1):(2*T)] <- df_final[, (T+1):(2*T)] + RIs[, 2]
-    
   } else {
-    # No random intercepts - just use within-person data
     df_final <- df_within
     colnames(df_final) <- c(paste("x", 1:T, sep = ""), paste("y", 1:T, sep = ""))
     RIs <- NULL
   }
-  
-  # --- Return results ---
   
   result <- list(
     data = df_final,
@@ -162,7 +127,9 @@ DGM <- function(N = 20000,
       n_x_confounders = c1,
       n_y_confounders = c2,
       autocorr_effects = alpha,
-      beta_focal = beta_focal,
+      beta_focal = beta_focal, 
+      beta_xy = beta_xy,       
+      beta_yx = beta_yx,
       beta_covfocal = beta_covfocal,
       beta_covnofocal = beta_covnofocal,
       sigma = sigma,
@@ -180,12 +147,8 @@ DGM <- function(N = 20000,
     coefficient_matrix = A
   )
   
-  # Add components if RIs were used
   if (include_time_invariant_confounding) {
-    result$components <- list(
-      within = df_within,
-      between = RIs
-    )
+    result$components <- list(within = df_within, between = RIs)
   }
   
   return(result)
@@ -226,7 +189,7 @@ plot_xy_sequences <- function(data, timepoints, n_participants = 5) {
 }
 
 # -------------------------------------------------------------------------------
-# Create output structure with metadata
+# Create output structure with metadata -  helper
 
 create_metadata <- function(){
   list(
@@ -240,7 +203,7 @@ create_metadata <- function(){
 }
 
 # -------------------------------------------------------------------------------
-# Save results and clear memory function
+# Save results and clear memory function - helper
 
 save_clear <- function(results, filename_prefix = "sim_results"){
   timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
@@ -327,7 +290,7 @@ generate_clpm <- function(T){
     var_y_rest
   )
   
-  # Add together, skip empty strings and add linebreaks
+  # Add together, skip empty strings and add linebreaks (for legibility)
   model_string <- paste(components[components != ""], collapse = "\n")
   
   return(model_string)
@@ -446,7 +409,7 @@ generate_riclpm <- function(T) {
 
 generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplitz") {
   
-  # --- 1. Input Validation ---
+  # Input Validation
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
     stop("T must be an integer greater or equal to 3.")
   }
@@ -463,15 +426,14 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     stop("across_seg_cov must be either 'zero', 'free', or 'toeplitz'.")
   }
   
-  # --- 2. Determine Number of Segments ---
+  # Determine Number of Segments
   n_segments <- ceiling(T / timespan)
   
   # Create a mapping of timepoints to segments
   timepoint_to_segment <- rep(1:n_segments, each = timespan)[1:T]
   
-  # --- 3. Generate Random Intercepts for Each Segment ---
-  # Structure: All RIx's first, then all RIy's
-  
+  # Generate Random Intercepts for Each Segment
+
   ri_x_definitions <- c()
   ri_y_definitions <- c()
   
@@ -494,11 +456,11 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
   # Combine: all X's first, then all Y's
   ri_definitions <- c(ri_x_definitions, ri_y_definitions)
   
-  # --- 4. Within-person Component Definitions ---
+  # Within-person Component Definitions
   wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
   wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 5. Autoregressive and Cross-lagged Paths ---
+  # Autoregressive and Cross-lagged Paths
   if (T > 1) {
     timepoints_reg <- 2:T
     lagged_timepoints <- 1:(T - 1)
@@ -513,7 +475,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     paths_wy <- ""
   }
   
-  # --- 6. Covariances ---
+  # Covariances
   # First wave: covariance (exogenous)
   # Subsequent waves: constrained correlated residuals (endogenous)
   if (T > 1) {
@@ -522,7 +484,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     res_covs <- ""
   }
   
-  # --- 7. Variances of Within-person Components ---
+  # Variances of Within-person Components
   # First wave: variance (exogenous, no predictors)
   var_wx1 <- "wx1 ~~ wx1"
   var_wy1 <- "wy1 ~~ wy1"
@@ -536,11 +498,11 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     var_wy_rest <- ""
   }
   
-  # --- 8. Fix Observed Variances to Zero ---
+  # Fix Observed Variances to Zero 
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 9. Random Intercept Variances and Covariances ---
+  # Random Intercept Variances and Covariances
   
   # Within-segment variances and within-timespan covariances (RIx with RIy at same segment)
   ri_variances_and_within_seg_covs <- c()
@@ -629,7 +591,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
     }
   }
   
-  # --- 10. Fix RI Covariances with First State to Zero ---
+  # Fix RI Covariances with First State to Zero
   ri_first_state_zero <- c()
   for (seg in 1:n_segments) {
     ri_first_state_zero <- c(ri_first_state_zero,
@@ -639,7 +601,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
                              sprintf("wy1 ~~ 0*RIy%d", seg))
   }
   
-  # --- 11. Assemble Final Model String ---
+  # Assemble Final Model String
   
   components <- c(
     "# 1. Random Intercepts (Segmented) - X then Y",
@@ -685,7 +647,7 @@ generate_segmented_riclpm <- function(T, timespan = 3, across_seg_cov = "toeplit
 
 generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "toeplitz") {
   
-  # --- 1. Input Validation ---
+  #  Input Validation
   if (!is.numeric(T) || T <= 2 || T %% 1 != 0) {
     stop("T must be an integer greater or equal to 3.")
   }
@@ -702,19 +664,18 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
     stop("across_seg_cov must be either 'zero', 'free', or 'toeplitz'.")
   }
   
-  # --- 2. Determine Number of Segments ---
+  #  Determine Number of Segments
   n_segments <- ceiling(T / timespan)
   
   # Create a mapping of timepoints to segments
   timepoint_to_segment <- rep(1:n_segments, each = timespan)[1:T]
   
-  # --- 3. Generate Global Random Intercepts (spanning ALL timepoints) ---
+  #  Generate Global Random Intercepts (on ALL timepoints)
   global_ri_x <- sprintf("RIgx =~ %s", paste(sprintf("1*x%d", 1:T), collapse = " + "))
   global_ri_y <- sprintf("RIgy =~ %s", paste(sprintf("1*y%d", 1:T), collapse = " + "))
   
-  # --- 4. Generate Segmented Random Intercepts ---
-  # Structure: All RIx's first, then all RIy's
-  
+  #  Generate Segmented Random Intercepts
+
   ri_x_definitions <- c()
   ri_y_definitions <- c()
   
@@ -737,11 +698,11 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
   # Combine: Global RIs first, then all segmented X's, then all segmented Y's
   ri_definitions <- c(global_ri_x, global_ri_y, ri_x_definitions, ri_y_definitions)
   
-  # --- 5. Within-person Component Definitions ---
+  #  Within-person Component Definitions
   wx_defs <- paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "\n")
   wy_defs <- paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 6. Autoregressive and Cross-lagged Paths ---
+  #  Autoregressive and Cross-lagged Paths
   if (T > 1) {
     timepoints_reg <- 2:T
     lagged_timepoints <- 1:(T - 1)
@@ -756,7 +717,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
     paths_wy <- ""
   }
   
-  # --- 7. Covariances ---
+  # Covariances
   # First wave: covariance (exogenous)
   # Subsequent waves: constrained correlated residuals (endogenous)
   if (T > 1) {
@@ -765,7 +726,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
     res_covs <- ""
   }
   
-  # --- 8. Variances of Within-person Components ---
+  # Variances of Within-person Components
   # First wave: variance (exogenous, no predictors)
   var_wx1 <- "wx1 ~~ wx1"
   var_wy1 <- "wy1 ~~ wy1"
@@ -779,21 +740,21 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
     var_wy_rest <- ""
   }
   
-  # --- 9. Fix Observed Variances to Zero ---
+  # Fix Observed Variances to Zero
   zero_var_x <- paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "\n")
   zero_var_y <- paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "\n")
   
-  # --- 10. Random Intercept Variances and Covariances ---
+  # Random Intercept Variances and Covariances
   
   ri_variances_and_covs <- c()
   
-  # --- 10a. Global RI Variances and Covariance ---
+  # Global RI Variances and Covariance
   ri_variances_and_covs <- c(ri_variances_and_covs,
                              "RIgx ~~ varRIgx*RIgx",
                              "RIgy ~~ varRIgy*RIgy",
                              "RIgx ~~ covRIg*RIgy")
   
-  # --- 10b. Segmented RI Variances and Within-segment Covariances ---
+  # Segmented RI Variances and Within-segment Covariances
   
   # First: All RIx variances - CONSTRAINED EQUAL
   for (seg in 1:n_segments) {
@@ -813,7 +774,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
                                sprintf("RIx%d ~~ covRI*RIy%d", seg, seg))
   }
   
-  # --- 10c. Fix Global-to-Segmented RI Covariances to Zero ---
+  # Fix Global-to-Segmented RI Covariances to Zero
   global_seg_zero_covs <- c()
   for (seg in 1:n_segments) {
     global_seg_zero_covs <- c(global_seg_zero_covs,
@@ -823,7 +784,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
                               sprintf("RIgy ~~ 0*RIy%d", seg))
   }
   
-  # --- 10d. Across-segment Covariances for Segmented RIs ---
+  # Across-segment Covariances for Segmented RIs
   ri_across_seg_covs <- c()
   across_seg_label <- ""
   
@@ -886,7 +847,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
     }
   }
   
-  # --- 11. Fix RI Covariances with First State to Zero ---
+  # Fix RI Covariances with First State to Zero
   ri_first_state_zero <- c()
   
   # Global RIs with first state
@@ -905,7 +866,7 @@ generate_segmented_riclpm_global <- function(T, timespan = 3, across_seg_cov = "
                              sprintf("wy1 ~~ 0*RIy%d", seg))
   }
   
-  # --- 12. Assemble Final Model String ---
+  # Assemble Final Model String
   
   components <- c(
     "# 1. Random Intercepts",

@@ -1524,86 +1524,145 @@ kable(coverage_analysis,
       caption   = "Coverage Rates: % of 95% CIs containing the True Value (0.1)")
 ```
 
-Kleine sanity check - waarom werken de SRI-CLPM's zo slecht bij T=6?
+### Global RI
 
 ```{r}
-bx <- numeric(200)
-by <- numeric(200)
+source("functionSource.R")
+library(lavaan)
+library(knitr)
 
-bx1 <- numeric(200)
-by1 <- numeric(200)
+seed       <- 42
+timepoints <- 20
 
-bx2 <- numeric(200)
-by2 <- numeric(200)
+# ==============================================================================
+# HELPER: fit model and extract relevant estimates
+# ==============================================================================
 
-rix <- numeric(200)
-riy <- numeric(200)
+extract_estimates <- function(data, timepoints, timespan = 2) {
+  fit <- sem(generate_segmented_riclpm_global(T = timepoints, timespan = timespan),
+             data = data$data)
+  est <- coef(fit)
 
-for (i in seq(1:200)){
-  
-  data <- DGM(N = 250, timepoints = 15, autocorr_effects = .3, ri_var_x = 1, ri_var_y = 1, ri_cor = .1, seed = i)
-  
-  fit <- sem(generate_riclpm(15), data$data)
-  fit1 <- sem(generate_segmented_riclpm(15, timespan = 3), data$data)
-  fit2 <- sem(generate_segmented_riclpm_global(15, timespan = 3), data$data)  
-  
-  bx[i] <- coef(fit)["bx"]
-  by[i] <- coef(fit)["by"]
-  
-  bx1[i] <- coef(fit1)["bx"]
-  by1[i] <- coef(fit1)["by"]
+  g <- function(nm) if (nm %in% names(est)) unname(est[nm]) else NA_real_
 
-  bx2[i] <- coef(fit2)["bx"]
-  by2[i] <- coef(fit2)["by"]
-  
-  rix[i] <- coef(fit)["RIx"]
-  riy[i] <- coef(fit)["RIy"]
+  list(
+    varRIgx = g("varRIgx"),
+    varRIgy = g("varRIgy"),
+    varRIx  = g("varRIx"),
+    varRIy  = g("varRIy"),
+    covRIg  = g("covRIg")
+  )
 }
 
-print("RI-CLPM")
-print("means")
-print(mean(bx))
-print(mean(by))
+# ==============================================================================
+# DATA GENERATION & FITTING
+# ==============================================================================
 
-print("sd")
-print(sd(bx))
-print(sd(by))
+data1 <- DGM(N = 100000, timepoints = timepoints,
+             ri_var_x = 1, ri_var_y = 1, ri_cor = 0.1,
+             n_x_confounders = 0, n_y_confounders = 0, seed = seed)
 
-print("SRI-CLPM -------")
-print("means")
-print(mean(bx1))
-print(mean(by1))
+data2 <- DGM(N = 100000, timepoints = timepoints,
+             n_x_confounders = 5, n_y_confounders = 5, seed = seed)
 
-print("sd")
-print(sd(bx1))
-print(sd(by1))
+data3 <- DGM(N = 100000, timepoints = timepoints,
+             ri_var_x = 1, ri_var_y = 1, ri_cor = 0.1,
+             n_x_confounders = 5, n_y_confounders = 5, seed = seed)
 
-print("SRI-CLPM-G -------")
-print("means")
-print(mean(bx2))
-print(mean(by2))
+e1 <- extract_estimates(data1, timepoints)
+e2 <- extract_estimates(data2, timepoints)
+e3 <- extract_estimates(data3, timepoints)
 
-print("sd")
-print(sd(bx2))
-print(sd(by2))
+# ==============================================================================
+# TABLE
+# ==============================================================================
+
+results_table <- data.frame(
+  Parameter   = c("varRIgx", "varRIgy", "varRIx (segmented)",
+                  "varRIy (segmented)", "covRIg"),
+  True_C1     = c(1, 1, 0, 0, 0.1),
+  Est_C1      = c(e1$varRIgx, e1$varRIgy, e1$varRIx, e1$varRIy, e1$covRIg),
+  True_C2     = c(0, 0, 0, 0, 0),
+  Est_C2      = c(e2$varRIgx, e2$varRIgy, e2$varRIx, e2$varRIy, e2$covRIg),
+  True_C3     = c(1, 1, 0, 0, 0.1),
+  Est_C3      = c(e3$varRIgx, e3$varRIgy, e3$varRIx, e3$varRIy, e3$covRIg)
+)
+
+kable(results_table,
+      digits    = 4,
+      col.names = c("Parameter",
+                    "True", "Estimated",
+                    "True", "Estimated",
+                    "True", "Estimated"),
+      caption   = paste0(
+        "Population-level estimates (N = 100,000, T = ", timepoints,
+        ", timespan = 2). ",
+        "C1 = time-invariant only; C2 = time-varying only; C3 = both."
+      ))
 ```
 
-Takeaways from sanity checks:
+### Degrees of Freedom
 
-On few timepoints (6), using a timespan of 2 seems to really overcorrect for the combined confounding (means around .93)
+Test: T=6, results in 49 DF, 59 model parameters
 
-Increasing it to a timespan of 3 fixes the correction a lot, actually halves bias at the cost of a +- 20% increase in SE.
+```{r}
+replications <- 50
+N <- 200
+timepoints <- 30
+nconf <- 5
 
-Checking that the time-varying stuff still works for the new DGM:
+arr <- numeric(replications)
 
-Increasing autocorr effects to .3 -\> makes the performance gap between RI-CLPM clearer, but not that much. Maybe its the T?
+for (i in seq(1,replications)){
+  
+  df <- DGM(N = N, timepoints = timepoints,
+            n_x_confounders = nconf, n_y_confounders = nconf,
+            seed = i)$data
 
-T = 15: gap between RI-CLPM and SRI-CLPM becomes much clearer.
+  fit <- sem(generate_segmented_riclpm(timepoints, timespan = 2), data = df)
+  fit2 <- sem(generate_riclpm(timepoints), data = df)
 
-Timepoints voor simulaties
+  anv <- anova(fit,fit2)
+  arr[i] <- anv$`Pr(>Chisq)`[2]
+  
+  if(i%%5 == 0){cat("At replication: ", i, " of ", replications)}
+}
 
-T = 6, 12, 24, evt 48
+test <- arr < .05
+summary(test)
+```
 
-N varieren van 150, 300?
+```{r}
+source('functionSource.R')
 
-L = timespan length
+timepoints <- 20
+N <- 150
+replications <- 200
+results_list <- list()
+
+for (i in 1:replications) {
+  df <- DGM(N = N, timepoints = timepoints, beta_xy = .1, beta_yx = 0, 
+            seed = i)$data
+
+  fit <- sem(generate_segmented_riclpm(T = 16, timespan = 2), data = df)
+  coef <- parameterEstimates(fit)
+  
+  bx_row <- coef[coef$label == 'bx', ]
+  by_row <- coef[coef$label == 'by', ]
+  
+  results_list[[i]] <- data.frame(
+    rep = i,
+    bx_est = bx_row$est[1],
+    bx_p   = bx_row$pvalue[1],
+    by_est = by_row$est[1],
+    by_p   = by_row$pvalue[1]
+  )
+}
+
+final_results <- do.call(rbind, results_list)
+
+view(final_results)
+
+mean(final_results$bx_p<.05)
+mean(final_results$by_p<.05)
+```
