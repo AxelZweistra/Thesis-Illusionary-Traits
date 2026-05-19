@@ -5,7 +5,7 @@ abstract: |
     The cross-lagged panel model (CLPM) is a popular option for researchers in the social sciences interested in multivariate longitudinal data. Often criticized as being too restrictive in assumptions concerning confounding, this paper presents an extension of the CLPM aimed at controlling for both time-varying and time-invariant confounding. This development is heavily inspired by the ‘illusory trait’ finding, showing that the RI-CLPM can not only correct for the time-invariant confounding it was designed to correct for, but also for time-varying confounding. The performance of this new model, the segmented random intercept cross-lagged panel model (SRI-CLPM) is examined in a series of Monte Carlo simulations. These show the model outperforming the RI-CLPM and CLPM in retrieving less biased estimates of cross-lagged parameters, at a slight increase in standard errors. This effect becomes more pronounced as more timepoints are considered, as the RI-CLPM starts to be unable to correct for time-varying confounding. A possible further extension of the SRI-CLPM is also explored, aimed at separating the variance associated with time-varying and time-invariant confounding.   
 keywords: [CLPM, RI-CLPM, Cross-Lagged Panel Modeling, Illusory Traits, SRI-CLPM, Time-Varying Confounding]
 author:
-  - name: Axel Zweistra
+  - name: Axel Zweistra (7663200)
     affiliations: 
     - name : Utrecht University
       department: Department of Methods and Statistics, Faculty of Social and Behavioural Sciences
@@ -36,6 +36,10 @@ author:
       country: The Netherlands
       postal-code: 3584 CH
       
+author-note:
+  disclosures:
+    conflict-of-interest: The author(s) declare that there were no conflicts of interest with respect to the  authorship or the publication of this article. Thesis for the  Research Master Methodology and Statistics for the Behavioural, Biomedical and Social Sciences. Candidate journal is Structural Equation Modeling. FETC Registration Number 25-2051. Generative AI was used for the generation of code, all code was reviewed and edited manually with the first author taking full responsibility for the final analysis. Code repository can be found at https://github.com/AxelZweistra/Thesis-Illusionary-Traits
+
 format:
   apaquarto-pdf: 
     keep-tex: true
@@ -48,6 +52,10 @@ editor: visual
 bibliography: refs.bib
 csl: apa.csl
 ---
+
+```{r, include = F}
+library(here)
+```
 
 When researchers are concerned with studying how two variables interact over time, a helpful technique is the estimation of cross-lagged parameters [@orthTestingProspectiveEffects2021] . Cross-lagged parameters predict the change in an outcome variable based on a previous measurement of the other variable, while controlling for the score on the outcome variable at the preceding occasion through an autoregressive parameter. Models that include these parameters, such as the cross-lagged panel model [CLPM, @duncanLinearModelsTwowave1969], are widely used in the social sciences. A major concern when using these estimates for causal inference purposes is the possibility of them being affected by unobserved confounding [@hamakerCritiqueCrosslaggedPanel2015; @rogosaCritiqueCrosslaggedCorrelation1980].
 
@@ -63,19 +71,19 @@ The aim of this paper is threefold. First, we will investigate whether our expec
 
 # Illusory Traits in the RI-CLPM as the Number of Timepoints Increases
 
-We hypothesize that as the number of timepoints increases, the illusory traits will disappear (that is, their variance will go to zero), and that this development goes hand-in-hand with a deterioration of the ability of the RI-CLPM to retrieve relatively unbiased cross-lagged parameter estimates. We therefore build on the simulations done by Bailey et al. [@baileyIllusoryTraitsWrong2024] by considering the effect of more timepoints. In addition, we also vary the number of time-varying confounders and the strength of the autoregressive effects across all variables to illustrate the role of temporal stability in the observed processes.
+We hypothesize that as the number of timepoints increases, the illusory traits will disappear (that is, their variance will go to zero), and that this development goes hand-in-hand with a deterioration of the ability of the RI-CLPM to retrieve relatively unbiased cross-lagged parameter estimates. We therefore build on the simulations done by Bailey et al. [-@baileyIllusoryTraitsWrong2024] by considering the effect of more timepoints. In addition, we also vary the number of time-varying confounders and the strength of the autoregressive effects across all variables to illustrate the role of temporal stability in the observed processes.
 
-## Extending the Simulation by Bailey et al.
+## Extending the Simulation by Bailey and colleagues
 
-The data generating mechanism is adapted from the original illusory trait paper by Bailey et al. [-@baileyIllusoryTraitsWrong2024], largely following their provided R-code. We use the same underlying parameter values they specified as the defaults, only deviating from this to investigate particular properties. We introduce their data generating mechanism here, but refer to the original paper for a more in-depth discussion of the parameter value choices. A schematic representation of the data generating mechanism can be found in Figure 1. The data generating mechanism consists of a bivariate CLPM with the addition of systems of time-varying unobserved confounding. The relationships between the observed variables X and Y are expressed in the autoregressive effects and the cross-lagged effects.
+The data generating mechanism is adapted from the original illusory trait paper by Bailey et al. [-@baileyIllusoryTraitsWrong2024], largely following their provided R-code. We use the same underlying parameter values they specified as the defaults, only deviating from this to investigate particular properties. We introduce their data generating mechanism here, but refer to the original paper for a more in-depth discussion of the parameter value choices. A schematic representation of the data generating mechanism can be found in @fig-DGM. The data generating mechanism consists of a bivariate CLPM with the addition of systems of time-varying unobserved confounding. The relationships between the observed variables $X$ and $Y$ are expressed in the autoregressive effects and the cross-lagged effects.
 
-In the first simulation, we generate data according to the data generating mechanism, with conditions varying the number of unobserved confounders on both variables and varying the autoregressive effects for all variables (observed or unobserved). We will then attempt to accurately retrieve estimates of the cross-lagged parameters under confounding, fitting models only on the observed variables X and Y. We vary the number of unobserved confounders on each variable to be either 4 or 6, resulting in a total number of 8 or 12 respectively. The system (or grouping) of unobserved confounders on one variable has the same parameter values with themselves and their observed variable as before; cross-lagged effects of .1 and autoregressive effects varying to be .2 or .3. Additionally, the two systems weakly influence each other, with all confounders on X having a lagged effect of .01 on the confounders on Y and vice versa. Time-specific residual variances were specified to be .5. After specifying the model, we sample from the stationary covariance matrix of a single timepoint [see equation 2.1.39 in @lutkepohlNewIntroductionMultiple2007] following the procedure in the original paper. This approach has the benefit of not requiring to start up the process and wait for it to reach its stationary state. We take a large sample of 20 thousand cases, ensuring we can clearly estimate the degree of bias in the cross-lagged parameters without the influence of sampling variation.
+In the first simulation, we generate data according to the data generating mechanism, with conditions varying the number of unobserved confounders on both variables and varying the autoregressive effects for all variables (observed or unobserved). We will then attempt to accurately retrieve estimates of the cross-lagged parameters under confounding, fitting models only on the observed variables X and Y. We vary the number of unobserved confounders on each variable to be either 4 or 6, resulting in a total number of 8 or 12 respectively. The system (or grouping) of unobserved confounders on one variable has the same parameter values with themselves and their observed variable as before; cross-lagged effects of .1 and autoregressive effects varying to be .2 or .3. Additionally, the two systems weakly influence each other, with all confounders on $X$ having a lagged effect of .01 on the confounders on $Y$ and vice versa. Time-specific residual variances were specified to be .5. After specifying the model, we sample from the stationary covariance matrix of a single timepoint [see equation 2.1.39 in @lutkepohlNewIntroductionMultiple2007a] following the procedure in the original paper. This approach has the benefit of not requiring to start up the process and wait for it to reach its stationary state. We take a large sample of 20 thousand cases, ensuring we can clearly estimate the degree of bias in the cross-lagged parameters without the influence of sampling variation.
 
 ```{r Figure 1: 2x2}
 #| label: fig-DGM
 #| fig-cap: "Schematic representation of the data generating mechanism adapted from Bailey et al. Triple dots represent left out intermediary variables for visual clarity."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "45%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/DGM.png"))
@@ -92,13 +100,13 @@ After generating 75 occasions using the model described above, we first select o
 
 ## Results
 
-Figure 2 shows the bias in the cross-lagged parameter from $X$ to $Y$, together with the estimated variance of the random intercept for $X$, for each combination of the number of confounders and autoregressive effects. We choose to display only one of the cross-lagged parameters and one of the random intercepts since the model is symmetrical, and as such the results are virtually identical for the other parameters. As expected for all conditions, the illusory trait variance decreases as the number of timepoints increases. The bias in the cross-lagged parameter rises accordingly, illustrating the direct relationship between the illusory trait variance and bias in cross-lagged parameters. The data generating mechanism conditions show that more confounders (right column versus left column), or a more stable process due to higher autoregressive effects (bottom row versus top row) are associated with a larger variance for the illusory trait, and a slower decline of this variance as the number of timepoints increases.
+@fig-sim1_2x2 shows the bias in the cross-lagged parameter from $X$ to $Y$, together with the estimated variance of the random intercept for $X$, for each combination of the number of confounders and autoregressive effects. We choose to display only one of the cross-lagged parameters and one of the random intercepts since the model is symmetrical, and as such the results are virtually identical for the other parameters. As expected for all conditions, the illusory trait variance decreases as the number of timepoints increases. The bias in the cross-lagged parameter rises accordingly, illustrating the direct relationship between the illusory trait variance and bias in cross-lagged parameters. The data generating mechanism conditions show that more confounders (right column versus left column), or a more stable process due to higher autoregressive effects (bottom row versus top row) are associated with a larger variance for the illusory trait, and a slower decline of this variance as the number of timepoints increases.
 
 ```{r Figure 2: 2x2}
 #| label: fig-sim1_2x2
 #| fig-cap: "Bias in the cross-lagged parameter and random intercept variance per condition. α = autoregressive effects of all variables (observed or unobserved), Confounders = number of unobserved confounders on both observed variables. Highlighted panel has different y-axis."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "70%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/fig_sim1_2x2.png"))
@@ -114,13 +122,13 @@ In this section we introduce a new model that aims to make use of the illusory t
 
 ## Model Specification
 
-We propose the Segmented Random Intercept Cross-Lagged Panel Model (SRI-CLPM), which is a CLPM extended with random intercepts for segments of the total timespan of the study. Figure 3 shows a schematic example of a SRI-CLPM, specified on segments with two timepoints.
+We propose the Segmented Random Intercept Cross-Lagged Panel Model (SRI-CLPM), which is a CLPM extended with random intercepts for segments of the total timespan of the study. @fig-SRI-CLPM shows a schematic example of a SRI-CLPM, specified on segments with two timepoints.
 
-```{r Figure 1: 2x2}
+```{r Figure 3: SRI-CLPM}
 #| label: fig-SRI-CLPM
-#| fig-cap: "Schematic representation of the SRI-CLPM. RI = random intercept, all random intercepts are allowed to covary, represented by the connecting double arrow."
+#| fig-cap: "Schematic representation of the SRI-CLPM. RI = Random Intercept, all random intercepts are allowed to covary, represented by the connecting double arrow."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "80%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/SRI-CLPM.png"))
@@ -133,15 +141,14 @@ Another concern is how to estimate the covariance structure of the latent variab
 
 A natural starting point here is to impose constraints that follow the stationarity assumption along which we also simulate the data. This implies we constrain the variances of all segmented random intercepts on the same variable to be equal, since we assume the variance in the confounding process to be stable over time. In addition, we also constrain covariances across a set lag to be equal. In our bivariate example, this would imply two distinct sets of constraints; covariances between ‘lateral’ random intercepts on the same variable (i.e., two random intercepts on $X$) and covariances between random intercepts on separate variables (i.e., a random intercept on $X$ and one on $Y$). Both sets of covariances are constrained to be equal across a set lag, but both are constrained separately. For example, the covariance between the first and second random intercepts on $X$ are constrained equal to the covariance between the second and third. The same holds for covariances between a random intercept on $X$ and one on $Y$, but these are not constrained to the same covariance at the same lag on two random intercepts estimated on the same variable. Constraining the random intercept covariances in this manner corresponds to a block-Toeplitz matrix, which can be seen as minimally restrictive (assuming stationarity) while still reducing the number of parameters greatly. A schematic representation of the resulting constrained covariance matrix between the segmented random intercepts can be found below, alongside the formula for the number of degrees of freedom of a SRI-CLPM constrained in this manner.
 
-# TABLE1:TOEPLITZ
-
 ```{r Table 1: Toeplitz}
-#| label: table-Toep
-#| fig-cap: "Constrained segmented random intercept covariance matrix, shading to illustrate the different 'blocks' corresponding to distinct kinds of covariances."
+#| label: tbl-Toep
+#| tbl-cap: "Constrained segmented random intercept covariance matrix, shading to illustrate the different 'blocks' corresponding to distinct kinds of covariances."
 #| echo: false
-#| out-width: "100%"
-#| fig-align: "left"
+#| out-width: "90%"
+#| fig-align: "center"
 #| fig-pos: "H"
+
 knitr::include_graphics(here("images/table-toep.png"))
 ```
 
@@ -167,23 +174,23 @@ In order to evaluate the degree of bias in the cross-lagged parameters retrieved
 
 The study length that we consider was chosen to be 6, 12, 18, 24 and 30 timepoints. This is done so all numbers of timepoints can be divided by both 2 and 3, allowing us to specify segments of these lengths. In this manner we aim to get some indication of the role of segment length in the performance of the model. To assess the performance of the Toeplitz-constrained random intercept covariances we estimate two specifications of the SRI-CLPM: one with these constraints and one with freely estimated random intercept variances and covariances.
 
-Figure 3 shows the distributions of one of the cross-lagged parameter estimates, visualized as boxplots, as they are obtained from various models and for an increasing number of timepoints. The true parameter value is .1, displayed as the horizontal dotted line. The RI-CLPM’s cross-lagged parameter estimates slowly increase to the uncorrected biased estimates retrieved by the CLPM. As expected, the SRI-CLPM is able to retrieve less biased cross-lagged parameter estimates when the number of timepoints considered increases, at the cost of somewhat larger variance in the sampling distribution compared to the CLPM and RI-CLPM. Figure 3 also shows the effect of the segment length chosen for the random intercepts has on the bias and sampling variability of the cross-lagged parameters. Increasing the segment length from two to three leads to a slight increase in bias, but in turn also reduces sampling variability slightly, which is likely due to the decrease in the number of parameters estimated that needs to be estimated when the segment is larger. 
+@fig-boxplots shows the distributions of one of the cross-lagged parameter estimates, visualized as boxplots, as they are obtained from various models and for an increasing number of timepoints. The true parameter value is .1, displayed as the horizontal dotted line. The RI-CLPM’s cross-lagged parameter estimates slowly increase to the uncorrected biased estimates retrieved by the CLPM. As expected, the SRI-CLPM is able to retrieve less biased cross-lagged parameter estimates when the number of timepoints considered increases, at the cost of somewhat larger variance in the sampling distribution compared to the CLPM and RI-CLPM. @fig-boxplots also shows the effect of the segment length chosen for the random intercepts has on the bias and sampling variability of the cross-lagged parameters. Increasing the segment length from two to three leads to a slight increase in bias, but in turn also reduces sampling variability slightly, which is likely due to the decrease in the number of parameters estimated that needs to be estimated when the segment is larger. 
 
 ```{r Figure 4: Boxplots}
 #| label: fig-boxplots
 #| fig-cap: "Sample distributions of the cross-lagged parameter per model specification. Boxplots represent the interquartile range of point estimates. Dashed line represents the true value of .1. SL = segment length, -free indicates the model had freely estimated covariances between segmented random intercepts. "
 #| echo: false
-#| out-width: "100%"
+#| out-width: "105%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/fig_T_effect_bx.png"))
 ```
 
-Figure 4 shows the 95% confidence interval coverage rates for all structural parameters (also including the autoregressive parameters), comparing the SRI-CLPM (right column) with Toeplitz latent variable constraints and a segment length of 2 to the CLPM (left column) and RI-CLPM (middle column). The coverage rates for cross-lagged parameters show a substantial improvement over the biased estimates in the RI-CLPM and CLPM. Interestingly however, the autoregressive parameters show a marked decline in 95% CI coverage rates as more timepoints are considered. Another puzzling aspect of this is that it seems the model decline is more pronounced on the larger sample size, which is somewhat alarming. It is important to note however, that retrieving unbiased estimates of autoregressive parameters was not the goal of this simulation and is usually not the goal of cross-lagged panel modeling.
+@fig-heatmap shows the 95% confidence interval coverage rates for all structural parameters (also including the autoregressive parameters), comparing the SRI-CLPM (right column) with Toeplitz latent variable constraints and a segment length of 2 to the CLPM (left column) and RI-CLPM (middle column). The coverage rates for cross-lagged parameters show a substantial improvement over the biased estimates in the RI-CLPM and CLPM. Interestingly however, the autoregressive parameters show a marked decline in 95% CI coverage rates as more timepoints are considered. Another puzzling aspect of this is that it seems the model decline is more pronounced on the larger sample size, which is somewhat alarming. It is important to note however, that retrieving unbiased estimates of autoregressive parameters was not the goal of this simulation and is usually not the goal of cross-lagged panel modeling.
 
 ```{r Figure 5: Heatmap}
 #| label: fig-heatmap
-#| fig-cap: "Heatmap showing the 95% confidence interval coverage rates for all structural parameters per model, per timepoint and per sample size condition (N). Coverage rate denotes the frequency with which the true value was contained in the 95% confidence interval. "
+#| fig-cap: "Heatmap showing the 95% confidence interval coverage rates for all structural parameters per model, per timepoint and per sample size condition (N). Coverage rate denotes the frequency with which the true value was contained in the 95% confidence interval."
 #| echo: false
 #| out-width: "100%"
 #| fig-align: "left"
@@ -195,13 +202,13 @@ knitr::include_graphics(here("images/fig_coverage_heatmap.png"))
 
 We present an additional simulation study aimed at investigating the statistical power and type I error rates for the cross-lagged parameters as estimated in the SRI-CLPM. To achieve this, we generate data from the same mechanism as before, only setting one of the cross-lagged effects to zero. This allows us to assess both statistical power in detecting the true cross-lagged effect of .1, and the type I error rate of detecting an effect when the true cross-lagged effect is zero. For simplicity, we focus on 20 timepoints, using a segment length of two, while varying the sample sizes between 100, 150 and 200. For each of these three conditions, we simulated a thousand replications.
 
-The distribution of p-values for the cross-lagged parameters are presented in Figure 4 below, along with the statistical power and type I error. The SRI-CLPM shows acceptable power on samples as small as 100 cases and a relatively uniform p-value distribution on the cross-lagged effect that was set to zero. There is however a somewhat inflated type I error rate when compared to the nominal $\alpha$ of .05 used, which importantly does decrease on larger sample sizes.
+The distribution of p-values for the cross-lagged parameters are presented in @fig-power below, along with the statistical power and type I error. The SRI-CLPM shows acceptable power on samples as small as 100 cases and a relatively uniform p-value distribution on the cross-lagged effect that was set to zero. There is however a somewhat inflated type I error rate when compared to the nominal $\alpha$ of .05 used, which importantly does decrease on larger sample sizes.
 
 ```{r Figure 4: Power}
 #| label: fig-power
 #| fig-cap: "Distributions of estimated p-values per cross-lagged parameter true value (0.1 or 0) per sample size condition (N). Bar chart shows the distributions, power denotes the percentage where the null hypothesis was correctly rejected, type I error denotes the percentage where the null hypothesis was incorrectly rejected."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "80%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/fig_power.png"))
@@ -217,13 +224,13 @@ Until now, we have only considered processes containing systems of time-varying 
 
 ## Model Specification
 
-Aiming to capture time-invariant confounding, we specify a variation of the SRI-CLPM with the addition of a global random intercept estimated on all repeated measurements of a variable, resembling the standard RI-CLPM. These global random intercepts can be allowed to covary freely, but are assumed to be independent of the other segmented random intercepts. In this manner, we hope to be able to distinguish variance associated with time-invariant confounding from variance associated with time-varying confounding. A schematic representation of this new model, which we refer to as the SGRI-CLPM, is shown below.
+Aiming to capture time-invariant confounding, we specify a variation of the SRI-CLPM with the addition of a global random intercept estimated on all repeated measurements of a variable, resembling the standard RI-CLPM. These global random intercepts can be allowed to covary freely, but are assumed to be independent of the other segmented random intercepts. In this manner, we hope to be able to distinguish variance associated with time-invariant confounding from variance associated with time-varying confounding. A schematic representation of this new model, which we refer to as the SGRI-CLPM, is shown in @fig-SGRI-CLPM below.
 
 ```{r Figure 7: SGRI-CLPM}
 #| label: fig-SGRI-CLPM
 #| fig-cap: "Schematic representation of the SGRI-CLPM. RI = random intercept, GRI = global random intercept. Random intercepts are allowed to covary, but their covariance with the global random intercepts is constrained to zero."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "70%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/SGRI-CLPM.png"))
@@ -233,23 +240,23 @@ knitr::include_graphics(here("images/SGRI-CLPM.png"))
 
 We assess the performance of the SGRI-CLPM with another Monte Carlo simulation study, comparing it to the performance of the SRI-CLPM. For this, the data generating mechanism introduced by Bailey et al. [-@baileyIllusoryTraitsWrong2024] is extended to also allow for the generation of data with time-invariant confounding. We assume the time-invariant confounding is orthogonal to the time-varying confounding, meaning we only have to generate a between-case deviation from the mean. This entails specifying a variance for both the confounder on $X$ and on $Y$, taking into account their covariance. Afterwards, this deviation from the mean per case can be added to its time-varying process.
 
-Both the SRI-CLPM and this extended SGRI-CLPM are then used to analyze the data generating with various mechanisms: either with only time-varying confounding or with both types of confounding. Both specifications use the Toeplitz-constrained segmented random intercept covariances and a segment length of three, on 30 total timepoints. While earlier simulations show a smaller segment length yielding better results, three was chosen as a convenient way to divide 30 timepoints. We simulate 1000 replications, using a realistic sample size of 200. The distributions of cross-lagged parameter estimates for the two model in each of the conditions are plotted in Figure 3. Interestingly, the model specifications seem to perform identically at retrieving unbiased cross-lagged parameter estimates, even when a time-invariant component is added. This becomes especially clear in Figure 4, where the point estimate of the SGRI-CLPM is plotted against the point estimate of the SRI-CLPM on the same data, which shows that these are virtually identical.
+Both the SRI-CLPM and this extended SGRI-CLPM are then used to analyze the data generating with various mechanisms: either with only time-varying confounding or with both types of confounding. Both specifications use the Toeplitz-constrained segmented random intercept covariances and a segment length of three, on 30 total timepoints. While earlier simulations show a smaller segment length yielding better results, three was chosen as a convenient way to divide 30 timepoints. We simulate 1000 replications, using a realistic sample size of 200. The distributions of cross-lagged parameter estimates for the two model in each of the conditions are plotted in @fig-SGRIboxplot. Interestingly, the model specifications seem to perform identically at retrieving unbiased cross-lagged parameter estimates, even when a time-invariant component is added. This becomes especially clear in @fig-scatter, where the point estimate of the SGRI-CLPM is plotted against the point estimate of the SRI-CLPM on the same data, which shows that these are virtually identical.
 
 ```{r Figure 8: Boxplot}
-#| label: fig8-boxplot
+#| label: fig-SGRIboxplot
 #| fig-cap: "Interquartile ranges for estimated cross-lagged parameters per model, per confounding condition. Dashed line represents the true value of .1."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "60%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/fig_srig_comparison.png"))
 ```
 
 ```{r Figure 9: Scatter}
-#| label: fig9-scatter
+#| label: fig-scatter
 #| fig-cap: "Point estimates for both model specifications on the same data plotted against one another, per confounding condition. Dashed line represents equality between both estimates."
 #| echo: false
-#| out-width: "100%"
+#| out-width: "60%"
 #| fig-align: "left"
 #| fig-pos: "H"
 knitr::include_graphics(here("images/fig_scatter.png"))
@@ -263,15 +270,68 @@ The SGRI-CLPM estimates two random intercept variances per variable of interest,
 
 To assess how accurately the SGRI-CLPM can separate the confounding variance into the time-varying and time-invariant components, we generate data with all four combinations of confounding. This means we generate data according to a simple CLPM without confounding, a CLPM with time-varying confounding, a CLPM with time-invariant confounding (i.e., RI-CLPM) and a CLPM with both types of confounding. We can then compare the estimated segmented random intercept variance and the global random intercept variance across these conditions. All conditions are replicated 500 times, with a sample size of 200 and using a SGRI-CLPM estimated on 20 timepoints with a segment length of two. It should be noted at this point that the values for the segmented random intercept and global random intercept cannot be directly compared. The global random intercept variance is attributed to one underlying latent variable, indicated by all measurements and should therefore in theory retrieve the variance specified for the time-invariant component in the data generating mechanism. In contrast, the segmented random intercept variance is constrained to be equal across multiple latent variables, each having an effect on a segment of the total timespan. The estimated segmented random intercept variance therefore does not necessarily retrieve one inputted variance in the data generating mechanism.
 
-Table x shows the mean random intercept variances of $X$ per condition, alongside the mean point estimate of the cross-lagged parameter of $X$ on $Y$. When the unconfounded CLPM generated the data, the SGRI-CLPM correctly estimate random intercept variances around 0 for both the segmented and global random intercepts, but it does suffer from improper solutions by estimating negative variances. Interestingly, the global random intercept seems to be able to capture the stable component relatively well. In the conditions where a time-invariant confounder was present (time-invariant and combined) the mean estimate is relatively close to the true value of 1. There does seem to be some misattribution of variance into the other components, which is most clearly visible in the time-invariant condition. We would expect the global random intercept to capture the complete confounding variance of 1, yet a small portion of the variance is attributed to the segmented random intercepts. The same holds for the time-varying condition, although the difference here is harder to interpret because we have not quantified the total time-varying component. The combined condition shows a promising separation, although the time-varying component seems to be somewhat inflated.
+@tbl-sgri-summary shows the mean random intercept variances of $X$ per condition, alongside the mean point estimate of the cross-lagged parameter of $X$ on $Y$. When the unconfounded CLPM generated the data, the SGRI-CLPM correctly estimate random intercept variances around 0 for both the segmented and global random intercepts, but it does suffer from improper solutions by estimating negative variances. Interestingly, the global random intercept seems to be able to capture the stable component relatively well. In the conditions where a time-invariant confounder was present (time-invariant and combined) the mean estimate is relatively close to the true value of 1. There does seem to be some misattribution of variance into the other components, which is most clearly visible in the time-invariant condition. We would expect the global random intercept to capture the complete confounding variance of 1, yet a small portion of the variance is attributed to the segmented random intercepts. The same holds for the time-varying condition, although the difference here is harder to interpret because we have not quantified the total time-varying component. The combined condition shows a promising separation, although the time-varying component seems to be somewhat inflated.
 
-# TAB2:SGRI-CLPM VARS
+```{r}
+#| label: tbl-sgri-summary
+#| tbl-cap: "Mean of Point Estimates for SGRI Model Parameters Across Simulation Conditions"
+#| echo: false
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(here)
+
+final_df <- readRDS(here("SGRI_CLPM_Simulation_20260503_031342.rds"))
+
+# 1. Process the data
+summary_table <- final_df %>%
+  filter(model == "SGRI") %>%
+  group_by(condition) %>%
+  summarise(
+    Mean_varRIgx = mean(varRIgx, na.rm = TRUE),
+    Mean_varRIx  = mean(varRIx, na.rm = TRUE),
+    Mean_bx      = mean(bx, na.rm = TRUE)
+  ) %>%
+  # 2. Rename and reorder conditions explicitly
+  mutate(condition = case_match(condition,
+    "pure"       ~ "Pure (No Confounding)",
+    "time_var"   ~ "Time-varying",
+    "time_invar" ~ "Time-invariant",
+    "combined"   ~ "Combined",
+    .default     = condition
+  )) %>%
+  mutate(condition = factor(condition, levels = c(
+    "Pure (No Confounding)", 
+    "Time-varying", 
+    "Time-invariant", 
+    "Combined"
+  ))) %>%
+  arrange(condition)
+
+# 3. Render with kable
+kable(
+  summary_table, 
+  col.names = c("Condition", "Global RI", "Segmented RI", "Cross-Lagged Parameter"),
+  digits = 3,
+  booktabs = TRUE, 
+  escape = FALSE 
+) %>%
+  kable_styling(
+    latex_options = c("hold_position", "striped"),
+    full_width = FALSE
+  )
+```
 
 These results should be seen as exploratory, and a proof of concept. Further work is needed to validate the SGRI-CLPM’s ability to separate confounding into its source components. We only show here that it is in theory possible to make some sort of separation, whether this separation can be made cleanly and accurately cannot be said from this simulation alone. If a researchers only interest is to control for the influence of unobserved confounding, whether time-varying or time-invariant, the SRI-CLPM suffices.
 
+\newpage
+
 # Discussion
 
-In this paper, we aim to apply the ‘illusory trait’ finding as presented by Bailey et al. [-@baileyIllusoryTraitsWrong2024] to control for time-varying confounding in cross-lagged panel modeling when the number of timepoints increases. Unobserved confounding is a serious threat to the estimation of structural parameters in SEM [@hamakerCritiqueCrosslaggedPanel2015: @murayamaThinkingClearlyTimeinvariant2024; @rogosaCritiqueCrosslaggedCorrelation1980]. While theoretically identifying possible confounders and controlling for their influence through their modeling as covariates may be considered preferable, it is unlikely that we are able to always observe all potential confounders. We therefore introduced a new model we refer to as the Segmented Random Intercept Cross-Lagged Panel Model (SRI-CLPM), which consists of extending the CLPM with random intercepts for segments of the total study duration. Simulation results show the SRI-CLPM successfully controls for confounding, whether time-varying, time-invariant, or both. We believe a model that is able to retrieve unbiased cross-lagged parameters regardless of the presence or absence of any type of confounding to be of substantive interest to researchers.
+In this paper, we aim to apply the ‘illusory trait’ finding as presented by Bailey et al. [-@baileyIllusoryTraitsWrong2024] to control for time-varying confounding in cross-lagged panel modeling when the number of timepoints increases. Unobserved confounding is a serious threat to the estimation of structural parameters in SEM [@hamakerCritiqueCrosslaggedPanel2015; @murayamaThinkingClearlyTimeinvariant2024; @rogosaCritiqueCrosslaggedCorrelation1980]. While theoretically identifying possible confounders and controlling for their influence through their modeling as covariates may be considered preferable, it is unlikely that we are able to always observe all potential confounders. We therefore introduced a new model we refer to as the Segmented Random Intercept Cross-Lagged Panel Model (SRI-CLPM), which consists of extending the CLPM with random intercepts for segments of the total study duration. Simulation results show the SRI-CLPM successfully controls for confounding, whether time-varying, time-invariant, or both. We believe a model that is able to retrieve unbiased cross-lagged parameters regardless of the presence or absence of any type of confounding to be of substantive interest to researchers.
 
 In the first simulation, we have shown that the illusory random intercept variance decreases as the number of timepoints increases. As a result, the ability of the RI-CLPM to retrieve less biased estimates of the cross-lagged parameters deteriorates until it eventually retrieves the uncorrected bias as in the CLPM. Given the random intercepts apparent ability to correct for time-varying confounding in the short term, we then utilized this by designing a model with multiple random intercepts estimated on segments of the full timespan. We then assess the performance of this SRI-CLPM in the second simulation. Here we have shown the SRI-CLPM is able to retrieve substantially less biased estimates of the cross-lagged parameters on longer timespans at the cost of larger standard errors. Interestingly, the same did hold for the autoregressive parameters, yet as more timepoints are considered this unbiased estimation seems to deteriorate. We have then proposed another possible modeling specification which makes use of a global random intercept, specified in the same way as in the traditional RI-CLPM, with its covariance to the segmented random intercepts fixed to zero. This was aimed at separating time-invariant confounding variance from time-varying confounding. The performance of this model was compared to the simpler SRI-CLPM on datasets containing both time-varying and time-invariant confounding. Both model specifications retrieved almost exactly the same, unbiased cross-lagged parameter estimates. Although the addition of the global random intercept shows some promise in being able to separate confounding into its sources, more work is needed to validate these results.
 
@@ -284,6 +344,8 @@ There are several important limitations to consider when interpreting the curren
 In sum, there are many aspects, both theoretical and practical, of the new model that are still unclear. Future work should therefore be done to clarify the functionality of the model, under which conditions it retrieves accurate estimates and how it can be extended. For example, in the current study lavaan often retrieves improper solutions concerning the latent variables, such as correlations of more than 1 and negative random intercept (co)variances. Future work could investigate whether these issues could be addressed by using different estimators, through constrained maximum likelihood or Bayesian estimation with constrained priors. Another important area of study is model selection and model fit, by comparing the S(G)RI-CLPM with the more parsimonious RI-CLPM and CLPM. Finding a reliable manner of model selection between these four possible cross-lagged panel models could be a valuable asset, since we have now introduced a model for every possible combination of time-varying and time-invariant confounding. Additionally, work could be done to relax the restrictions currently in place by assuming stationarity and ergodicity. An interesting extension could be made to allow for individual cases to have random slopes for the cross-lagged effects, thereby relaxing the assumption of ergodicity.
 
 Concluding, we want to emphasize the importance of considering the possible and very likely presence of confounding in any process of interest, and how to control for its influence. As the present study and the original paper by Bailey et al. [-@baileyIllusoryTraitsWrong2024] shows, the RI-CLPM is able to correct for both time-invariant confounding and some influence of time-varying confounding, yet this correction for time-varying confounding breaks down as the number of timepoints measured increases. Therefore, researchers have the option of exploring the newly introduced S(G)RI-CLPM, which is shown to be able to retrieve less biased structural parameter estimates compared to the RI-CLPM. While much is still unclear about this model, it provides a promising and reasonably accessible method for addressing confounding, regardless of its source.
+
+\newpage
 
 # References
 

@@ -167,7 +167,7 @@ Method to Account for Unobserved Time-Varying Confounding}
 
 
 
-\authorsnames{Axel Zweistra,Jeroen Mulder,Ellen Hamaker}
+\authorsnames{Axel Zweistra (7663200),Jeroen Mulder,Ellen Hamaker}
 
 
 
@@ -180,7 +180,7 @@ Sciences, Utrecht University}}
 
 
 
-\leftheader{Zweistra, Mulder and Hamaker}
+\leftheader{(7663200), Mulder and Hamaker}
 
 
 
@@ -206,15 +206,23 @@ and time-invariant confounding. }
 \keywords{CLPM, RI-CLPM, Cross-Lagged Panel Modeling, Illusory
 Traits, SRI-CLPM, Time-Varying Confounding}
 
-\authornote{\par{\addORCIDlink{Axel
-Zweistra}{0009-0000-8790-4608}}\par{\addORCIDlink{Jeroen
+\authornote{\par{\addORCIDlink{Axel Zweistra
+(7663200)}{0009-0000-8790-4608}}\par{\addORCIDlink{Jeroen
 Mulder}{0000-0002-5553-0856}} 
 
-\par{       }
+\par{   The author(s) declare that there were no conflicts of interest
+with respect to the authorship or the publication of this article.
+Thesis for the Research Master Methodology and Statistics for the
+Behavioural, Biomedical and Social Sciences. Candidate journal is
+Structural Equation Modeling. FETC Registration Number 25-2051.
+Generative AI was used for the generation of code, all code was reviewed
+and edited manually with the first author taking full responsibility for
+the final analysis. Code repository can be found at
+https://github.com/AxelZweistra/Thesis-Illusionary-Traits    }
 \par{Correspondence concerning this article should be addressed to Axel
-Zweistra, Department of Methods and Statistics, Faculty of Social and
-Behavioural Sciences, Utrecht University, Padualaan 14, Utrecht 3584
-CH, The
+Zweistra (7663200), Department of Methods and Statistics, Faculty of
+Social and Behavioural Sciences, Utrecht University, Padualaan
+14, Utrecht 3584 CH, The
 Netherlands, Email: \href{mailto:a.p.zweistra@uu.nl}{a.p.zweistra@uu.nl}}
 }
 
@@ -514,14 +522,14 @@ traits will disappear (that is, their variance will go to zero), and
 that this development goes hand-in-hand with a deterioration of the
 ability of the RI-CLPM to retrieve relatively unbiased cross-lagged
 parameter estimates. We therefore build on the simulations done by
-Bailey et al. (\citeproc{ref-baileyIllusoryTraitsWrong2024}{Bailey et
-al., 2024}) by considering the effect of more timepoints. In addition,
-we also vary the number of time-varying confounders and the strength of
-the autoregressive effects across all variables to illustrate the role
-of temporal stability in the observed processes.
+Bailey et al. (\citeproc{ref-baileyIllusoryTraitsWrong2024}{2024}) by
+considering the effect of more timepoints. In addition, we also vary the
+number of time-varying confounders and the strength of the
+autoregressive effects across all variables to illustrate the role of
+temporal stability in the observed processes.
 
-\subsection{Extending the Simulation by Bailey et
-al.}\label{extending-the-simulation-by-bailey-et-al.}
+\subsection{Extending the Simulation by Bailey and
+colleagues}\label{extending-the-simulation-by-bailey-and-colleagues}
 
 The data generating mechanism is adapted from the original illusory
 trait paper by Bailey et al.
@@ -531,11 +539,11 @@ specified as the defaults, only deviating from this to investigate
 particular properties. We introduce their data generating mechanism
 here, but refer to the original paper for a more in-depth discussion of
 the parameter value choices. A schematic representation of the data
-generating mechanism can be found in Figure 1. The data generating
-mechanism consists of a bivariate CLPM with the addition of systems of
-time-varying unobserved confounding. The relationships between the
-observed variables X and Y are expressed in the autoregressive effects
-and the cross-lagged effects.
+generating mechanism can be found in Figure~\ref{fig-DGM}. The data
+generating mechanism consists of a bivariate CLPM with the addition of
+systems of time-varying unobserved confounding. The relationships
+between the observed variables \(X\) and \(Y\) are expressed in the
+autoregressive effects and the cross-lagged effects.
 
 In the first simulation, we generate data according to the data
 generating mechanism, with conditions varying the number of unobserved
@@ -549,13 +557,13 @@ vary the number of unobserved confounders on each variable to be either
 parameter values with themselves and their observed variable as before;
 cross-lagged effects of .1 and autoregressive effects varying to be .2
 or .3. Additionally, the two systems weakly influence each other, with
-all confounders on X having a lagged effect of .01 on the confounders on
-Y and vice versa. Time-specific residual variances were specified to be
-.5. After specifying the model, we sample from the stationary covariance
-matrix of a single timepoint (see equation 2.1.39 in
-\citeproc{ref-lutkepohlNewIntroductionMultiple2007}{Lütkepohl, 2007})
-following the procedure in the original paper. This approach has the
-benefit of not requiring to start up the process and wait for it to
+all confounders on \(X\) having a lagged effect of .01 on the
+confounders on \(Y\) and vice versa. Time-specific residual variances
+were specified to be .5. After specifying the model, we sample from the
+stationary covariance matrix of a single timepoint (see equation 2.1.39
+in \citeproc{ref-lutkepohlNewIntroductionMultiple2007a}{Lütkepohl,
+2007}) following the procedure in the original paper. This approach has
+the benefit of not requiring to start up the process and wait for it to
 reach its stationary state. We take a large sample of 20 thousand cases,
 ensuring we can clearly estimate the degree of bias in the cross-lagged
 parameters without the influence of sampling variation.
@@ -566,7 +574,7 @@ parameters without the influence of sampling variation.
 mechanism adapted from Bailey et al.~Triple dots represent left out
 intermediary variables for visual clarity.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/DGM.png}
+\includegraphics[width=0.45\linewidth,height=\textheight,keepaspectratio]{images/DGM.png}
 
 \end{figure}%
 
@@ -632,10 +640,10 @@ using maximum likelihood as implemented in lavaan 0.6-17
 
 \subsection{Results}\label{results}
 
-Figure 2 shows the bias in the cross-lagged parameter from \(X\) to
-\(Y\), together with the estimated variance of the random intercept~for
-\(X\), for each combination of the number of confounders and
-autoregressive effects. We choose to display only one of the
+Figure~\ref{fig-sim1_2x2} shows the bias in the cross-lagged parameter
+from \(X\) to \(Y\), together with the estimated variance of the random
+intercept~for \(X\), for each combination of the number of confounders
+and autoregressive effects. We choose to display only one of the
 cross-lagged parameters and one of the random intercepts since the model
 is symmetrical, and as such the results are virtually identical for the
 other parameters. As expected for all conditions, the illusory trait
@@ -657,7 +665,7 @@ all variables (observed or unobserved), Confounders = number of
 unobserved confounders on both observed variables. Highlighted panel has
 different y-axis.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/fig_sim1_2x2.png}
+\includegraphics[width=0.7\linewidth,height=\textheight,keepaspectratio]{images/fig_sim1_2x2.png}
 
 \end{figure}%
 
@@ -695,16 +703,17 @@ parameter estimates, even for data across longer timespans.
 
 We propose the Segmented Random Intercept Cross-Lagged Panel Model
 (SRI-CLPM), which is a CLPM extended with random intercepts for segments
-of the total timespan of the study. Figure 3 shows a schematic example
-of a SRI-CLPM, specified on segments with two timepoints.
+of the total timespan of the study. Figure~\ref{fig-SRI-CLPM} shows a
+schematic example of a SRI-CLPM, specified on segments with two
+timepoints.
 
 \begin{figure}[H]
 
 \caption{\label{fig-SRI-CLPM}Schematic representation of the SRI-CLPM.
-RI = random intercept, all random intercepts are allowed to covary,
+RI = Random Intercept, all random intercepts are allowed to covary,
 represented by the connecting double arrow.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/SRI-CLPM.png}
+\includegraphics[width=0.8\linewidth,height=\textheight,keepaspectratio]{images/SRI-CLPM.png}
 
 \end{figure}%
 
@@ -768,39 +777,16 @@ covariance matrix between the segmented random intercepts can be found
 below, alongside the formula for the number of degrees of freedom of a
 SRI-CLPM constrained in this manner.
 
-\section{TABLE1:TOEPLITZ}\label{table1toeplitz}
-
 \begin{table}
 
 {\caption{{Constrained segmented random intercept covariance matrix,
 shading to illustrate the different `blocks' corresponding to distinct
-kinds of covariances.}{\label{tbl-ri-covariance}}}
+kinds of covariances.}{\label{tbl-Toep}}}
 \vspace{-20pt}}
 
-\centering\begingroup\fontsize{13}{15}\selectfont
-
-\begin{tabular}[t]{l|>{}c|>{}c|>{}c|>{}c||>{}c|>{}c|>{}c|>{}c}
-\hline
-\begingroup\fontsize{13}{15}\selectfont \textbf{ }\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIx1}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIx2}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIx3}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIx4}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIy1}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIy2}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIy3}\endgroup & \begingroup\fontsize{13}{15}\selectfont \textbf{RIy4}\endgroup\\
-\hline
-RIx1 & \cellcolor{lightgrey}{$\psi_{x,x}$} & \cellcolor{lightgrey}{} & \cellcolor{lightgrey}{} & \cellcolor{lightgrey}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{}\\
-\hline
-RIx2 & \cellcolor{lightgrey}{$\psi^{lag1}_{x,x}$} & \cellcolor{lightgrey}{$\psi_{x,x}$} & \cellcolor{lightgrey}{} & \cellcolor{lightgrey}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{}\\
-\hline
-RIx3 & \cellcolor{lightgrey}{$\psi^{lag2}_{x,x}$} & \cellcolor{lightgrey}{$\psi^{lag1}_{x,x}$} & \cellcolor{lightgrey}{$\psi_{x,x}$} & \cellcolor{lightgrey}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{}\\
-\hline
-RIx4 & \cellcolor{lightgrey}{$\psi^{lag3}_{x,x}$} & \cellcolor{lightgrey}{$\psi^{lag2}_{x,x}$} & \cellcolor{lightgrey}{$\psi^{lag1}_{x,x}$} & \cellcolor{lightgrey}{$\psi_{x,x}$} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{} & \cellcolor{white}{}\\
-\hline
-RIy1 & \cellcolor{darkgrey}{$\psi^{lag0}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag2}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag3}_{x,y}$} & \cellcolor{grey}{$\psi_{y,y}$} & \cellcolor{grey}{} & \cellcolor{grey}{} & \cellcolor{grey}{}\\
-\hline
-RIy2 & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag0}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag2}_{x,y}$} & \cellcolor{grey}{$\psi^{lag1}_{y,y}$} & \cellcolor{grey}{$\psi_{y,y}$} & \cellcolor{grey}{} & \cellcolor{grey}{}\\
-\hline
-RIy3 & \cellcolor{darkgrey}{$\psi^{lag2}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag0}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{grey}{$\psi^{lag2}_{y,y}$} & \cellcolor{grey}{$\psi^{lag1}_{y,y}$} & \cellcolor{grey}{$\psi_{y,y}$} & \cellcolor{grey}{}\\
-\hline
-RIy4 & \cellcolor{darkgrey}{$\psi^{lag3}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag2}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag1}_{x,y}$} & \cellcolor{darkgrey}{$\psi^{lag0}_{x,y}$} & \cellcolor{grey}{$\psi^{lag3}_{y,y}$} & \cellcolor{grey}{$\psi^{lag2}_{y,y}$} & \cellcolor{grey}{$\psi^{lag1}_{y,y}$} & \cellcolor{grey}{$\psi_{y,y}$}\\
-\hline
-\end{tabular}
-\endgroup{}
+\begin{center}
+\includegraphics[width=0.9\linewidth,height=\textheight,keepaspectratio]{images/table-toep.png}
+\end{center}
 
 \end{table}
 
@@ -857,22 +843,22 @@ Toeplitz-constrained random intercept covariances we estimate two
 specifications of the SRI-CLPM: one with these constraints and one with
 freely estimated random intercept variances and covariances.
 
-Figure 3 shows the distributions of one of the cross-lagged parameter
-estimates, visualized as boxplots, as they are obtained from various
-models and for an increasing number of timepoints. The true parameter
-value is .1, displayed as the horizontal dotted line. The RI-CLPM's
-cross-lagged parameter estimates slowly increase to the uncorrected
-biased estimates retrieved by the CLPM. As expected, the SRI-CLPM is
-able to retrieve less biased cross-lagged parameter estimates when the
-number of timepoints considered increases, at the cost of somewhat
-larger variance in the sampling distribution compared to the CLPM and
-RI-CLPM. Figure 3 also shows the effect of the segment length chosen for
-the random intercepts has on the bias and sampling variability of the
-cross-lagged parameters. Increasing the segment length from two to three
-leads to a slight increase in bias, but in turn also reduces sampling
-variability slightly, which is likely due to the decrease in the number
-of parameters estimated that needs to be estimated when the segment is
-larger.~
+Figure~\ref{fig-boxplots} shows the distributions of one of the
+cross-lagged parameter estimates, visualized as boxplots, as they are
+obtained from various models and for an increasing number of timepoints.
+The true parameter value is .1, displayed as the horizontal dotted line.
+The RI-CLPM's cross-lagged parameter estimates slowly increase to the
+uncorrected biased estimates retrieved by the CLPM. As expected, the
+SRI-CLPM is able to retrieve less biased cross-lagged parameter
+estimates when the number of timepoints considered increases, at the
+cost of somewhat larger variance in the sampling distribution compared
+to the CLPM and RI-CLPM. Figure~\ref{fig-boxplots} also shows the effect
+of the segment length chosen for the random intercepts has on the bias
+and sampling variability of the cross-lagged parameters. Increasing the
+segment length from two to three leads to a slight increase in bias, but
+in turn also reduces sampling variability slightly, which is likely due
+to the decrease in the number of parameters estimated that needs to be
+estimated when the segment is larger.~
 
 \begin{figure}[H]
 
@@ -882,23 +868,24 @@ range of point estimates. Dashed line represents the true value of .1.
 SL = segment length, -free indicates the model had freely estimated
 covariances between segmented random intercepts.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/fig_T_effect_bx.png}
+\includegraphics[width=1.05\linewidth,height=\textheight,keepaspectratio]{images/fig_T_effect_bx.png}
 
 \end{figure}%
 
-Figure 4 shows the 95\% confidence interval coverage rates for all
-structural parameters (also including the autoregressive parameters),
-comparing the SRI-CLPM (right column) with Toeplitz latent variable
-constraints and a segment length of 2 to the CLPM (left column) and
-RI-CLPM (middle column). The coverage rates for cross-lagged parameters
-show a substantial improvement over the biased estimates in the RI-CLPM
-and CLPM. Interestingly however, the autoregressive parameters show a
-marked decline in 95\% CI coverage rates as more timepoints are
-considered. Another puzzling aspect of this is that it seems the model
-decline is more pronounced on the larger sample size, which is somewhat
-alarming. It is important to note however, that retrieving unbiased
-estimates of autoregressive parameters was not the goal of this
-simulation and is usually not the goal of cross-lagged panel modeling.
+Figure~\ref{fig-heatmap} shows the 95\% confidence interval coverage
+rates for all structural parameters (also including the autoregressive
+parameters), comparing the SRI-CLPM (right column) with Toeplitz latent
+variable constraints and a segment length of 2 to the CLPM (left column)
+and RI-CLPM (middle column). The coverage rates for cross-lagged
+parameters show a substantial improvement over the biased estimates in
+the RI-CLPM and CLPM. Interestingly however, the autoregressive
+parameters show a marked decline in 95\% CI coverage rates as more
+timepoints are considered. Another puzzling aspect of this is that it
+seems the model decline is more pronounced on the larger sample size,
+which is somewhat alarming. It is important to note however, that
+retrieving unbiased estimates of autoregressive parameters was not the
+goal of this simulation and is usually not the goal of cross-lagged
+panel modeling.
 
 \begin{figure}[H]
 
@@ -927,12 +914,13 @@ while varying the sample sizes between 100, 150 and 200. For each of
 these three conditions, we simulated a thousand replications.
 
 The distribution of p-values for the cross-lagged parameters are
-presented in Figure 4 below, along with the statistical power and type I
-error. The SRI-CLPM shows acceptable power on samples as small as 100
-cases and a relatively uniform p-value distribution on the cross-lagged
-effect that was set to zero. There is however a somewhat inflated type I
-error rate when compared to the nominal \(\alpha\) of .05 used, which
-importantly does decrease on larger sample sizes.
+presented in Figure~\ref{fig-power} below, along with the statistical
+power and type I error. The SRI-CLPM shows acceptable power on samples
+as small as 100 cases and a relatively uniform p-value distribution on
+the cross-lagged effect that was set to zero. There is however a
+somewhat inflated type I error rate when compared to the nominal
+\(\alpha\) of .05 used, which importantly does decrease on larger sample
+sizes.
 
 \begin{figure}[H]
 
@@ -942,7 +930,7 @@ cross-lagged parameter true value (0.1 or 0) per sample size condition
 where the null hypothesis was correctly rejected, type I error denotes
 the percentage where the null hypothesis was incorrectly rejected.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/fig_power.png}
+\includegraphics[width=0.8\linewidth,height=\textheight,keepaspectratio]{images/fig_power.png}
 
 \end{figure}%
 
@@ -999,7 +987,8 @@ but are assumed to be independent of the other segmented random
 intercepts. In this manner, we hope to be able to distinguish variance
 associated with time-invariant confounding from variance associated with
 time-varying confounding. A schematic representation of this new model,
-which we refer to as the SGRI-CLPM, is shown below.
+which we refer to as the SGRI-CLPM, is shown in
+Figure~\ref{fig-SGRI-CLPM} below.
 
 \begin{figure}[H]
 
@@ -1008,7 +997,7 @@ RI = random intercept, GRI = global random intercept. Random intercepts
 are allowed to covary, but their covariance with the global random
 intercepts is constrained to zero.}
 
-\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/SGRI-CLPM.png}
+\includegraphics[width=0.7\linewidth,height=\textheight,keepaspectratio]{images/SGRI-CLPM.png}
 
 \end{figure}%
 
@@ -1036,35 +1025,32 @@ earlier simulations show a smaller segment length yielding better
 results, three was chosen as a convenient way to divide 30 timepoints.
 We simulate 1000 replications, using a realistic sample size of 200. The
 distributions of cross-lagged parameter estimates for the two model in
-each of the conditions are plotted in Figure 3. Interestingly, the model
-specifications seem to perform identically at retrieving unbiased
-cross-lagged parameter estimates, even when a time-invariant component
-is added. This becomes especially clear in Figure 4, where the point
-estimate of the SGRI-CLPM is plotted against the point estimate of the
-SRI-CLPM on the same data, which shows that these are virtually
-identical.
+each of the conditions are plotted in Figure~\ref{fig-SGRIboxplot}.
+Interestingly, the model specifications seem to perform identically at
+retrieving unbiased cross-lagged parameter estimates, even when a
+time-invariant component is added. This becomes especially clear in
+Figure~\ref{fig-scatter}, where the point estimate of the SGRI-CLPM is
+plotted against the point estimate of the SRI-CLPM on the same data,
+which shows that these are virtually identical.
 
 \begin{figure}[H]
 
-\caption{Interquartile ranges for estimated cross-lagged parameters per
-model, per confounding condition. Dashed line represents the true value
-of .1.}
+\caption{\label{fig-SGRIboxplot}Interquartile ranges for estimated
+cross-lagged parameters per model, per confounding condition. Dashed
+line represents the true value of .1.}
 
-{\centering \includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/fig_srig_comparison.png}
-
-}
+\includegraphics[width=0.6\linewidth,height=\textheight,keepaspectratio]{images/fig_srig_comparison.png}
 
 \end{figure}%
 
 \begin{figure}[H]
 
-\caption{Point estimates for both model specifications on the same data
-plotted against one another, per confounding condition. Dashed line
-represents equality between both estimates.}
+\caption{\label{fig-scatter}Point estimates for both model
+specifications on the same data plotted against one another, per
+confounding condition. Dashed line represents equality between both
+estimates.}
 
-{\centering \includegraphics[width=1\linewidth,height=\textheight,keepaspectratio]{images/fig_scatter.png}
-
-}
+\includegraphics[width=0.6\linewidth,height=\textheight,keepaspectratio]{images/fig_scatter.png}
 
 \end{figure}%
 
@@ -1110,16 +1096,16 @@ each having an effect on a segment of the total timespan. The estimated
 segmented random intercept variance therefore does not necessarily
 retrieve one inputted variance in the data generating mechanism.
 
-Table x~shows the mean random intercept variances of \(X\) per
-condition, alongside the mean point estimate of the cross-lagged
-parameter of \(X\) on \(Y\). When the unconfounded CLPM generated the
-data, the SGRI-CLPM correctly estimate random intercept variances around
-0 for both the segmented and global random intercepts, but it does
-suffer from improper solutions by estimating negative variances.
-Interestingly, the global random intercept seems to be able to capture
-the stable component relatively well. In the conditions where a
-time-invariant confounder was present (time-invariant and combined) the
-mean estimate is relatively close to the true value of 1. There does
+Table~\ref{tbl-sgri-summary}~shows the mean random intercept variances
+of \(X\) per condition, alongside the mean point estimate of the
+cross-lagged parameter of \(X\) on \(Y\). When the unconfounded CLPM
+generated the data, the SGRI-CLPM correctly estimate random intercept
+variances around 0 for both the segmented and global random intercepts,
+but it does suffer from improper solutions by estimating negative
+variances. Interestingly, the global random intercept seems to be able
+to capture the stable component relatively well. In the conditions where
+a time-invariant confounder was present (time-invariant and combined)
+the mean estimate is relatively close to the true value of 1. There does
 seem to be some misattribution of variance into the other components,
 which is most clearly visible in the time-invariant condition. We would
 expect the global random intercept to capture the complete confounding
@@ -1130,7 +1116,24 @@ we have not quantified the total time-varying component. The combined
 condition shows a promising separation, although the time-varying
 component seems to be somewhat inflated.
 
-\section{TAB2:SGRI-CLPM VARS}\label{tab2sgri-clpm-vars}
+\begin{table}
+
+{\caption{{Mean of Point Estimates for SGRI Model Parameters Across
+Simulation Conditions}{\label{tbl-sgri-summary}}}
+\vspace{-20pt}}
+
+\begin{longtable*}[t]{lrrr}
+\toprule
+Condition & Global RI & Segmented RI & Cross-Lagged Parameter\\
+\midrule
+\cellcolor{gray!10}{Pure (No Confounding)} & \cellcolor{gray!10}{-0.008} & \cellcolor{gray!10}{0.008} & \cellcolor{gray!10}{0.102}\\
+Time-varying & 0.034 & 0.041 & 0.100\\
+\cellcolor{gray!10}{Time-invariant} & \cellcolor{gray!10}{0.968} & \cellcolor{gray!10}{0.026} & \cellcolor{gray!10}{0.101}\\
+Combined & 1.010 & 0.059 & 0.099\\
+\bottomrule
+\end{longtable*}
+
+\end{table}
 
 These results should be seen as exploratory, and a proof of concept.
 Further work is needed to validate the SGRI-CLPM's ability to separate
@@ -1141,14 +1144,19 @@ alone. If a researchers only interest is to control for the influence of
 unobserved confounding, whether time-varying or time-invariant, the
 SRI-CLPM suffices.
 
+\newpage
+
 \section{Discussion}\label{discussion}
 
 In this paper, we aim to apply the `illusory trait' finding as presented
 by Bailey et al. (\citeproc{ref-baileyIllusoryTraitsWrong2024}{2024}) to
 control for time-varying confounding in cross-lagged panel modeling when
 the number of timepoints increases. Unobserved confounding is a serious
-threat to the estimation of structural parameters in SEM Murayama \&
-Gfrörer (\citeproc{ref-murayamaThinkingClearlyTimeinvariant2024}{2024}).
+threat to the estimation of structural parameters in SEM
+(\citeproc{ref-hamakerCritiqueCrosslaggedPanel2015}{Hamaker et al.,
+2015}; \citeproc{ref-murayamaThinkingClearlyTimeinvariant2024}{Murayama
+\& Gfrörer, 2024};
+\citeproc{ref-rogosaCritiqueCrosslaggedCorrelation1980}{Rogosa, 1980}).
 While theoretically identifying possible confounders and controlling for
 their influence through their modeling as covariates may be considered
 preferable, it is unlikely that we are able to always observe all
@@ -1327,6 +1335,8 @@ While much is still unclear about this model, it provides a promising
 and reasonably accessible method for addressing confounding, regardless
 of its source.
 
+\newpage
+
 \section{References}\label{references}
 
 \protect\phantomsection\label{refs}
@@ -1385,10 +1395,10 @@ the {Right Choice}. \emph{Advances in Methods and Practices in
 Psychological Science}, \emph{6}(1), 25152459231158378.
 \url{https://doi.org/10.1177/25152459231158378}
 
-\bibitem[\citeproctext]{ref-lutkepohlNewIntroductionMultiple2007}
+\bibitem[\citeproctext]{ref-lutkepohlNewIntroductionMultiple2007a}
 Lütkepohl, H. (2007). \emph{New introduction to multiple time series
-analysis: With ... 36 tables} (1. ed., corr. 2. print). Berlin
-Heidelberg: Springer.
+analysis} (1st ed., corr. 2nd printing). Berlin Heidelberg New York:
+Springer.
 
 \bibitem[\citeproctext]{ref-molenaarManifestoPsychologyIdiographic2004}
 Molenaar, P. C. M. (2004). A {Manifesto} on {Psychology} as {Idiographic

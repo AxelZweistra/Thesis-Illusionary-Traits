@@ -88,7 +88,7 @@ DGM <- function(N = 20000,
     }
     
     Sigma <- diag(rep(sigma, v))
-    Sigma1 <- irow(solve(diag(dim(A)[1]^2) - t(A) %x% t(A)) %*% row(Sigma))
+    Sigma1 <- irow(solve(diag(dim(A)[1]^2) - t(A) %x% t(A)) %*% row(Sigma)) # stat varcov matrix (equation lutkepohl)
     Mean1 <- matrix(0, nrow = dim(A)[1], ncol = 1)
   }
   
@@ -119,6 +119,7 @@ DGM <- function(N = 20000,
     RIs <- NULL
   }
   
+  # return results as a list containing the data, and a parameters list containing input values for debugging
   result <- list(
     data = df_final,
     parameters = list(
