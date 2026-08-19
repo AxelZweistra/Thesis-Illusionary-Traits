@@ -532,6 +532,249 @@ ggplot(plot_p_data, aes(x = p_val)) +
   )
 ```
 
+### REWRITE 2:
+
+```{r}
+library(lavaan)
+library(parallel)
+library(mvtnorm)
+library(tidyverse)
+
+source("functionSource.R")
+
+timepoints   <- seq(6, 30, 6)
+replications <- 500 # increase if succesful
+N_conditions <- c(150, 200, 250)
+timespans    <- c(2, 3)
+seed         <- 42
+true_bx      <- 0.1
+true_by      <- 0
+
+modelSpecs_clpm <- setNames(
+  lapply(timepoints, function(i) generate_clpm(T = i)),
+  as.character(timepoints)
+)
+
+modelSpecs_riclpm <- setNames(
+  lapply(timepoints, function(i) generate_riclpm(T = i)),
+  as.character(timepoints)
+)
+
+modelSpecs_sriclpm <- setNames(
+  lapply(timespans, function(ts)
+    setNames(
+      lapply(timepoints, function(i)
+        generate_segmented_riclpm(T = i, timespan = ts, across_seg_cov = "toeplitz")),
+      as.character(timepoints)
+    )
+  ),
+  paste0("ts", timespans)
+)
+
+modelSpecs_sriclpm_free <- setNames(
+  lapply(timespans, function(ts)
+    setNames(
+      lapply(timepoints, function(i)
+        generate_segmented_riclpm(T = i, timespan = ts, across_seg_cov = "free")),
+      as.character(timepoints)
+    )
+  ),
+  paste0("ts", timespans)
+)
+
+fit_and_extract <- function(model_spec, model_label, tp, ts, N, data_df,
+                            rep_id, true_bx, true_by) {
+  
+  fit <- tryCatch(sem(model_spec, data = data_df), error = function(e) NULL)
+
+  if (!is.null(fit)) {
+    converged  <- lavInspect(fit, "converged")
+    post_check <- tryCatch(lavInspect(fit, "post.check"), error = function(e) FALSE)
+    n_iter     <- tryCatch(fit@optim$iterations,           error = function(e) NA)
+
+    coef_vec <- if (converged) coef(fit) else NULL
+    se_vec   <- if (converged) tryCatch(sqrt(diag(vcov(fit))), error = function(e) NULL) else NULL
+    pe       <- if (converged) tryCatch(parameterEstimates(fit), error = function(e) NULL) else NULL
+    
+    fit_meas <- tryCatch(
+      fitMeasures(fit, c("chisq", "df", "pvalue",
+                         "cfi", "tli", "rmsea", "srmr", "aic", "bic")),
+      error = function(e) rep(NA, 9)
+    )
+    rm(fit)
+  } else {
+    converged  <- FALSE
+    post_check <- FALSE
+    n_iter     <- NA
+    coef_vec   <- NULL
+    se_vec     <- NULL
+    pe         <- NULL
+    fit_meas   <- rep(NA, 9)
+  }
+
+  g <- function(vec, nm) {
+    if (!is.null(vec) && nm %in% names(vec)) vec[nm] else NA_real_
+  }
+
+  g_p <- function(pe_df, nm) {
+    if (!is.null(pe_df) && nm %in% pe_df$label) pe_df$pvalue[pe_df$label == nm][1] else NA_real_
+  }
+
+  data.frame(
+    replication  = rep_id,
+    N            = N,
+    timepoints   = tp,
+    timespan     = ts,
+    model_type   = model_label,
+    convergence  = converged,
+    post_check   = post_check,
+    n_iterations = n_iter,
+
+    bx      = g(coef_vec, "bx"),
+    by      = g(coef_vec, "by"),
+    bx_se   = g(se_vec,   "bx"),
+    by_se   = g(se_vec,   "by"),
+    bx_p    = g_p(pe,     "bx"),
+    by_p    = g_p(pe,     "by"),
+    bias_bx = g(coef_vec, "bx") - true_bx,
+    bias_by = g(coef_vec, "by") - true_by,
+
+    ax    = g(coef_vec, "ax"),
+    ay    = g(coef_vec, "ay"),
+    ax_se = g(se_vec,   "ax"),
+    ay_se = g(se_vec,   "ay"),
+
+    varRIx    = g(coef_vec, "varRIx"),
+    varRIy    = g(coef_vec, "varRIy"),
+    varRIx_se = g(se_vec,   "varRIx"),
+    varRIy_se = g(se_vec,   "varRIy"),
+    covRI     = g(coef_vec, "covRI"),
+    covRI_se  = g(se_vec,   "covRI"),
+
+    chisq  = fit_meas[1],
+    df     = fit_meas[2],
+    pvalue = fit_meas[3],
+    cfi    = fit_meas[4],
+    tli    = fit_meas[5],
+    rmsea  = fit_meas[6],
+    srmr   = fit_meas[7],
+    aic    = fit_meas[8],
+    bic    = fit_meas[9],
+    stringsAsFactors = FALSE,
+    row.names        = NULL
+  )
+}
+
+run_replication <- function(rep_id, timepoints, timespans, seed, N,
+                            true_bx, true_by,
+                            modelSpecs_clpm, modelSpecs_riclpm,
+                            modelSpecs_sriclpm, modelSpecs_sriclpm_free) {
+
+  data <- DGM(N = N, timepoints = max(timepoints), seed = seed + rep_id)
+  n_rows_per_rep <- length(timepoints) * (2L + length(timespans) * 2L)
+  rows <- vector("list", n_rows_per_rep)
+  k    <- 1L
+
+  for (i in timepoints) {
+    tp_key <- as.character(i)
+    data_i <- data$data[, c(paste0("x", 1:i), paste0("y", 1:i))]
+
+    rows[[k]] <- fit_and_extract(modelSpecs_clpm[[tp_key]],
+                                 "CLPM", i, NA_integer_, N,
+                                 data_i, rep_id, true_bx, true_by)
+    k <- k + 1L
+
+    rows[[k]] <- fit_and_extract(modelSpecs_riclpm[[tp_key]],
+                                 "RI-CLPM", i, NA_integer_, N,
+                                 data_i, rep_id, true_bx, true_by)
+    k <- k + 1L
+
+    for (ts in timespans) {
+      ts_key <- paste0("ts", ts)
+
+      rows[[k]] <- fit_and_extract(modelSpecs_sriclpm[[ts_key]][[tp_key]],
+                                   "SRI-CLPM", i, ts, N,
+                                   data_i, rep_id, true_bx, true_by)
+      k <- k + 1L
+
+      rows[[k]] <- fit_and_extract(modelSpecs_sriclpm_free[[ts_key]][[tp_key]],
+                                   "SRI-CLPM-free", i, ts, N,
+                                   data_i, rep_id, true_bx, true_by)
+      k <- k + 1L
+    }
+    rm(data_i)
+  }
+  rm(data)
+  do.call(rbind, rows)
+}
+
+n_cores <- max(1L, detectCores() - 1L)
+cat("Using", n_cores, "cores\n")
+cl <- makeCluster(n_cores)
+
+clusterExport(cl, varlist = c(
+  "DGM", "generate_clpm", "generate_riclpm", "generate_segmented_riclpm",
+  "fit_and_extract", "run_replication",
+  "timepoints", "timespans", "seed", "true_bx", "true_by",
+  "modelSpecs_clpm", "modelSpecs_riclpm",
+  "modelSpecs_sriclpm", "modelSpecs_sriclpm_free"
+))
+clusterEvalQ(cl, { library(lavaan); library(mvtnorm); source("functionSource.R") })
+
+data_struct      <- create_metadata()
+start_time_total <- Sys.time()
+all_results      <- vector("list", length(N_conditions))
+
+for (ni in seq_along(N_conditions)) {
+  N <- N_conditions[ni]
+  cat("\n--- N =", N, "---\n")
+  clusterExport(cl, varlist = "N", envir = environment())
+
+  condition_results <- parLapply(
+    cl,
+    seq_len(replications),
+    fun                     = run_replication,
+    timepoints              = timepoints,
+    timespans               = timespans,
+    seed                    = seed,
+    N                       = N,
+    true_bx                 = true_bx,
+    true_by                 = true_by,
+    modelSpecs_clpm         = modelSpecs_clpm,
+    modelSpecs_riclpm       = modelSpecs_riclpm,
+    modelSpecs_sriclpm      = modelSpecs_sriclpm,
+    modelSpecs_sriclpm_free = modelSpecs_sriclpm_free
+  )
+
+  all_results[[ni]] <- do.call(rbind, condition_results)
+  elapsed <- round(difftime(Sys.time(), start_time_total, units = "mins"), 1)
+  cat("N =", N, "done |", elapsed, "min elapsed\n")
+  saveRDS(all_results[[ni]], paste0("sim_combined_checkpoint_N", N, ".rds"))
+}
+
+stopCluster(cl)
+
+replication_results <- do.call(rbind, all_results)
+rownames(replication_results) <- NULL
+
+data_struct$results <- replication_results
+data_struct$simulation_parameters <- list(
+  replications = replications,
+  N_conditions = N_conditions,
+  timepoints   = timepoints,
+  timespans    = timespans,
+  seed         = seed,
+  true_bx      = true_bx,
+  true_by      = true_by
+)
+
+filename <- save_clear(data_struct, filename_prefix = "sim_overarching_combined")
+total_time <- difftime(Sys.time(), start_time_total, units = "mins")
+cat("\n=== Simulation Completed ===\n")
+cat("Total time:", round(total_time, 2), "minutes\n")
+cat("Results saved to:", filename, "\n")
+```
+
 ### Simulation 3: A global intercept / time-invariant confounding
 
 ```{r}
@@ -1245,6 +1488,119 @@ p_heatmap
 
 ggsave("images/fig_coverage_heatmap.png", p_heatmap, width = 7, height = 5.5, dpi = 300)
 # 3. Display Results
+```
+
+Simple version for presentation
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Assuming your sim object is loaded
+sim     <- sim_T_effect_20260329_135008
+results <- sim$results
+
+true_beta <- 0.1
+
+# ==============================================================================
+# 1. PREPARE & FILTER PLOT DATA (3 MODELS ONLY)
+# ==============================================================================
+plot_data <- results %>%
+  # Filter strictly for the comparison benchmarks and the specific SRI variant
+  filter(
+    model_type == "CLPM" | 
+    model_type == "RI-CLPM" | 
+    (model_type == "SRI-CLPM" & timespan == 2)
+  ) %>%
+  mutate(
+    model_label = case_when(
+      model_type %in% c("CLPM", "RI-CLPM") ~ model_type,
+      TRUE ~ paste0(model_type, " (SL=", timespan, ")")
+    ),
+    model_label = factor(model_label, levels = c(
+      "CLPM",
+      "RI-CLPM",
+      "SRI-CLPM (SL=2)"
+    )),
+    N_label = factor(paste0("N = ", N),
+                     levels = paste0("N = ", sort(unique(N))))
+  )
+
+mean_lines <- plot_data %>%
+  group_by(model_label, timepoints, N_label) %>%
+  summarise(mean_bx = mean(bx, na.rm = TRUE), .groups = "drop")
+
+# Simplified Color Palette
+model_colours <- c(
+  "CLPM"            = "#999999",  # grey
+  "RI-CLPM"         = "#0072B2",  # blue
+  "SRI-CLPM (SL=2)" = "#D55E00"   # vermilion
+)
+
+# ==============================================================================
+# 2. RE-CALCULATE REBALANCED DODGING OFFSETS
+# ==============================================================================
+n_models     <- length(levels(plot_data$model_label)) # Dynamic layout for 3 models
+dodge_offset <- 2.0
+box_width    <- dodge_offset * 0.22 # Widened boxes slightly since there are fewer models
+
+offsets <- setNames(
+  seq(-dodge_offset / 3, dodge_offset / 3, length.out = n_models),
+  levels(plot_data$model_label)
+)
+
+plot_data <- plot_data %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+mean_lines <- mean_lines %>%
+  mutate(x_dodged = timepoints + offsets[as.character(model_label)])
+
+# ==============================================================================
+# 3. GENERATE REFINED SIMPLIFIED PLOT
+# ==============================================================================
+p <- ggplot(plot_data,
+            mapping = aes(colour = model_label, fill = model_label)) +
+
+  geom_hline(yintercept = true_beta, linetype = "dashed",
+             colour = "black", linewidth = 0.45) +
+
+  geom_boxplot(
+    aes(x = x_dodged, y = bx,
+        group = interaction(timepoints, model_label)),
+    width         = box_width,
+    alpha         = 0.4,
+    outlier.size  = 0.5,
+    outlier.alpha = 0.2,
+    linewidth     = 0.35
+  ) +
+
+  # Explicit line connecting the means to trace convergence trends across T
+  geom_line(data = mean_lines, 
+            aes(x = x_dodged, y = mean_bx, group = model_label),
+            linewidth = 0.5, alpha = 0.8) +
+
+  facet_wrap(~ N_label, ncol = 1) +
+  
+  scale_colour_manual(values = model_colours, drop = FALSE) +
+  scale_fill_manual(values   = model_colours, drop = FALSE) +
+  scale_x_continuous(
+    breaks = sort(unique(plot_data$timepoints)),
+    labels = sort(unique(plot_data$timepoints))
+  ) +
+
+  labs(
+    x       = "Number of timepoints",
+    y       = "Cross-lagged estimate (\u03b2x)",
+    colour  = "Specification",
+    fill    = "Specification"
+  ) +
+
+  theme_apa +
+  theme(legend.position = "bottom") +
+  guides(colour = guide_legend(nrow = 1),
+         fill   = guide_legend(nrow = 1))
+
+p
 ```
 
 Explo 2

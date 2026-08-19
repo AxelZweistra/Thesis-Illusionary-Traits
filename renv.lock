@@ -1517,6 +1517,17 @@
       ],
       "Hash": "0d8a15c9d000970ada1ab21405387dee"
     },
+    "ps": {
+      "Package": "ps",
+      "Version": "1.9.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "utils"
+      ],
+      "Hash": "83e7e486c434e7acc71766dfc20adf2b"
+    },
     "psych": {
       "Package": "psych",
       "Version": "2.4.1",
@@ -1558,6 +1569,17 @@
         "R"
       ],
       "Hash": "5f919ae5e7f83a6f91dcf2288943370d"
+    },
+    "ragg": {
+      "Package": "ragg",
+      "Version": "1.5.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "systemfonts",
+        "textshaping"
+      ],
+      "Hash": "c06b460d55dd27458977e417e8ff02c7"
     },
     "rappdirs": {
       "Package": "rappdirs",
@@ -1917,6 +1939,22 @@
       ],
       "Hash": "1f930828d6590af5da47b3ab4fe161e6"
     },
+    "textshaping": {
+      "Package": "textshaping",
+      "Version": "1.0.5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "cpp11",
+        "lifecycle",
+        "stats",
+        "stringi",
+        "systemfonts",
+        "utils"
+      ],
+      "Hash": "addb750a886a2ac415dea6f8068867de"
+    },
     "tibble": {
       "Package": "tibble",
       "Version": "3.2.1",
@@ -2157,6 +2195,19 @@
         "graphics"
       ],
       "Hash": "cc2d62c76458d425210d1eb1478b30b4"
+    },
+    "xfun": {
+      "Package": "xfun",
+      "Version": "0.57",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "grDevices",
+        "stats",
+        "tools"
+      ],
+      "Hash": "476c8908ae56baf122e69bb2c2d9f631"
     },
     "xml2": {
       "Package": "xml2",
